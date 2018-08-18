@@ -1,11 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# Trains a simple convnet on the MNIST dataset. Gets to 99.25% test accuracy after 12 epochs
-# (there is still a lot of margin for parameter tuning). 16 seconds per epoch on a GRID K520 GPU.
-# 训练CNN模型对MNIST数据集分类
-# Output after 12 epochs on CPU(i5-7500): ~0.9925
-
 import numpy as np
 import pandas as pd
 import tensorflow as tf
