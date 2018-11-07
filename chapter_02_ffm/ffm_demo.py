@@ -6,13 +6,13 @@ import numpy as np
 import tensorflow as tf
 
 
-# 生成数据,_feature特征数量,_samples样本数量
-def data_gen(_feature, _samples):
+# 生成数据,_feature特征数量,_samples样本数量,_field类别数量
+def data_gen(_feature, _samples, _field):
     labels = [-1, 1]
     _y = [np.random.choice(labels, 1)[0] for _ in range(_samples)]
-    _field = [_k // 10 for _k in range(_feature)]
+    _f = [_k // int(_feature/_field) for _k in range(_feature)]
     _x = np.random.randint(0, 2, size=(_samples, _feature))
-    return _x, _y, _field
+    return _x, _y, _f
 
 
 # w0权值初始化
@@ -23,15 +23,15 @@ def w0_init():
 
 
 # w1权值初始化
-def w1_init(_feature):
-    w1 = tf.truncated_normal([_feature])
+def w1_init(_size):
+    w1 = tf.truncated_normal([_size])
     tf_w1 = tf.Variable(w1)
     return tf_w1
 
 
 # w2权值初始化
-def w2_init(_feature, _field, _dim):
-    w2 = tf.truncated_normal([_feature, _field, _dim])
+def w2_init(_size, _field, _dim):
+    w2 = tf.truncated_normal([_size, _field, _dim])
     tf_w2 = tf.Variable(w2)
     return tf_w2
 
@@ -39,9 +39,9 @@ def w2_init(_feature, _field, _dim):
 # 计算y的预测值
 def inference(_x, _field, _w0, _w1, _w2, _feature, _dim):
     _linear = tf.add(_w0, tf.reduce_sum(tf.multiply(_w1, _x)), name="linear")
-    _cross = tf.Variable(0.0, dtype=tf.float32)
+    _second = tf.Variable(0.0, dtype=tf.float32)
 
-    for i1 in range(_feature):
+    for i1 in range(_feature):  # 遍历特征
         idx1_feature = i1
         idx1_field = int(_field[i1])
         for j1 in range(i1+1, _feature):
@@ -63,22 +63,23 @@ def inference(_x, _field, _w0, _w1, _w2, _feature, _dim):
             xj = tf.squeeze(tf.gather_nd(_x, indices3))
             product = tf.reduce_sum(tf.multiply(xi, xj))
             temp_value = tf.multiply(vec_value, product)
-            tf.assign(_cross, tf.add(_cross, temp_value))
+            tf.assign(_second, tf.add(_second, temp_value))
 
-    return tf.add(_linear, _cross)
+    return tf.add(_linear, _second)
 
 
 if __name__ == '__main__':
-    MODEL_SAVE_PATH = "TFModel"
     MODEL_NAME = "FFM"
-    print('========== 1.Generating data...')
-    total_plan_train_steps = 1000
-    num_samples = 1000
-    num_feature = 20
+    MODEL_SAVE_PATH = "FFModel"
     num_field = 2
-    dim_vector = 3
+    num_feature = 20
+    num_samples = 100
+
+    dim_v = 3
     lr = 0.01
-    train_x, train_y, train_field = data_gen(num_feature, num_samples)
+    epochs = 100
+    print('========== 1.Generating data...')
+    train_x, train_y, train_field = data_gen(num_feature, num_samples, num_field)
 
     print('========== 2.Building model...')
     global_step = tf.Variable(0, trainable=False)
@@ -87,21 +88,21 @@ if __name__ == '__main__':
 
     init_w0 = w0_init()
     init_w1 = w1_init(num_feature)
-    init_w2 = w2_init(num_feature, num_field, dim_vector)  # n * f * k
-    y_ = inference(input_x, train_field, init_w0, init_w1, init_w2, num_feature, dim_vector)
+    init_w2 = w2_init(num_feature, num_field, dim_v)    # n * f * k
+    y_hat = inference(input_x, train_field, init_w0, init_w1, init_w2, num_feature, dim_v)
 
     lambda_w = tf.constant(0.001, name='lambda_w')
     lambda_v = tf.constant(0.001, name='lambda_v')
     l2_w1 = tf.multiply(lambda_w, tf.pow(init_w1, 2))
     l2_w2 = tf.reduce_sum(tf.multiply(lambda_v, tf.pow(init_w2, 2)), axis=[1, 2])
     l2_norm = tf.reduce_sum(tf.add(l2_w1, l2_w2))
-    loss = tf.log(1 + tf.exp(input_y * y_)) + l2_norm
+    loss = tf.log(1 + tf.exp(input_y * y_hat)) + l2_norm
 
     train_step = tf.train.GradientDescentOptimizer(learning_rate=lr).minimize(loss)
     saver = tf.train.Saver()
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        for i in range(total_plan_train_steps):
+        for i in range(epochs):
             for t in range(num_samples):
                 input_x_batch = train_x[t]
                 input_y_batch = train_y[t]
@@ -109,7 +110,6 @@ if __name__ == '__main__':
                                                   feed_dict={input_x: input_x_batch, input_y: input_y_batch})
                 print("After {step} training step(s),   loss on training batch is {predict_loss}"
                       .format(step=t, predict_loss=predict_loss))
-
                 saver.save(sess, os.path.join(MODEL_SAVE_PATH, MODEL_NAME), global_step=steps)
                 writer = tf.summary.FileWriter(os.path.join(MODEL_SAVE_PATH, MODEL_NAME), tf.get_default_graph())
                 writer.close()
