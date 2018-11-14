@@ -5,7 +5,6 @@ import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from sklearn.metrics import make_scorer
 from sklearn.model_selection import StratifiedKFold
 from dataReader import FeatureDictionary, DataParser
 from matplotlib import pyplot as plt
@@ -78,7 +77,7 @@ def run_base_model_dfm(dftrain, dftests, folds, dfm_para):
         dfm.fit(xi_train, xv_train, y_train_, xi_valid, xv_valid, y_valid_)
         y_train_meta[valid_idx, 0] = dfm.predict(xi_valid, xv_valid)
         y_tests_meta[:, 0] += dfm.predict(_xi_tests, _xv_tests)
-        print('待修改')
+
         gini_results_cv[i] = gini_norm(y_valid_, y_train_meta[valid_idx])
         gini_results_epoch_train[i] = dfm.train_result
         gini_results_epoch_valid[i] = dfm.valid_result
@@ -86,15 +85,15 @@ def run_base_model_dfm(dftrain, dftests, folds, dfm_para):
     y_tests_meta /= float(len(folds))
 
     # save result
-    if dfm_params["use_fm"] and dfm_params["use_deep"]:
+    if dfm_para["use_fm"] and dfm_para["use_deep"]:
         clf_str = "DeepFM"
-    elif dfm_params["use_fm"]:
+    elif dfm_para["use_fm"]:
         clf_str = "FM"
-    elif dfm_params["use_deep"]:
+    elif dfm_para["use_deep"]:
         clf_str = "DNN"
-    print("%s: %.5f (%.5f)"%(clf_str, gini_results_cv.mean(), gini_results_cv.std()))
-    filename = "%s_Mean%.5f_Std%.5f.csv"%(clf_str, gini_results_cv.mean(), gini_results_cv.std())
-    _make_submission(ids_test, y_tests_meta, filename)
+    print("%s: %.5f (%.5f)" % (clf_str, gini_results_cv.mean(), gini_results_cv.std()))
+    filename = "%s_Mean%.5f_Std%.5f.csv" % (clf_str, gini_results_cv.mean(), gini_results_cv.std())
+    _make_submission(_id_test, y_tests_meta, filename)
 
     _plot_fig(gini_results_epoch_train, gini_results_epoch_valid, clf_str)
 
@@ -114,13 +113,13 @@ def _plot_fig(train_results, valid_results, model_name):
     for i in range(train_results.shape[0]):
         plt.plot(xs, train_results[i], color=colors[i], linestyle="solid", marker="o")
         plt.plot(xs, valid_results[i], color=colors[i], linestyle="dashed", marker="o")
-        legends.append("train-%d"%(i+1))
-        legends.append("valid-%d"%(i+1))
+        legends.append("train-%d" % (i+1))
+        legends.append("valid-%d" % (i+1))
     plt.xlabel("Epoch")
     plt.ylabel("Normalized Gini")
-    plt.title("%s"%model_name)
+    plt.title("%s" % model_name)
     plt.legend(legends)
-    plt.savefig("fig/%s.png"%model_name)
+    plt.savefig("fig/%s.png" % model_name)
     plt.close()
 
 
@@ -133,7 +132,7 @@ dfm_params = {
     "deep_layers": [32, 32],
     "dropout_deep": [0.5, 0.5, 0.5],
     "deep_layer_activation": tf.nn.relu,
-    "epoch": 30,
+    "epoch": 10,
     "batch_size": 1024,
     "learning_rate": 0.001,
     "optimizer": "adam",

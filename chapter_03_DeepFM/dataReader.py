@@ -37,7 +37,7 @@ class FeatureDictionary(object):
         else:
             dftests = self.dftests
 
-        df = pd.concat([dftrain, dftests])
+        df = pd.concat([dftrain, dftests], sort=False)
 
         tc = 0
         for col in df.columns:
