@@ -115,6 +115,7 @@ def _plot_fig(train_results, valid_results, model_name):
         plt.plot(xs, valid_results[i], color=colors[i], linestyle="dashed", marker="o")
         legends.append("train-%d" % (i+1))
         legends.append("valid-%d" % (i+1))
+    plt.ylim(-0.1, 0.4)
     plt.xlabel("Epoch")
     plt.ylabel("Normalized Gini")
     plt.title("%s" % model_name)
@@ -132,7 +133,7 @@ dfm_params = {
     "deep_layers": [32, 32],
     "dropout_deep": [0.5, 0.5, 0.5],
     "deep_layer_activation": tf.nn.relu,
-    "epoch": 10,
+    "epoch": 30,
     "batch_size": 1024,
     "learning_rate": 0.001,
     "optimizer": "adam",
