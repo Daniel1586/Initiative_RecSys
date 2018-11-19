@@ -79,8 +79,7 @@ def run_base_model_dcn(dftrain, dftests, folds, dcn_para):
         dcn.fit(xi_train_cat, xv_train_cat, xv_train_num, y_train_,
                 xi_valid_cat, xv_valid_cat, xv_valid_num, y_valid_)
 
-        print('to be modified')
-        y_tests_meta[:, 0] += dcn.predict(cat_xi_tests, cat_xv_tests, num_xv_tests)
+        y_tests_meta += dcn.predict(cat_xi_tests, cat_xv_tests, num_xv_tests)
         gini_results_epoch_train[i] = dcn.train_result
         gini_results_epoch_valid[i] = dcn.valid_result
 
@@ -126,7 +125,7 @@ dcn_params = {
     "deep_layers": [32, 32],
     "dropout_deep": [0.5, 0.5, 0.5],
     "deep_layer_activation": tf.nn.relu,
-    "epoch": 5,
+    "epoch": 30,
     "batch_size": 1024,
     "learning_rate": 0.001,
     "optimizer": "adam",

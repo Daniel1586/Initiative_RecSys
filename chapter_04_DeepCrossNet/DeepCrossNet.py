@@ -218,7 +218,7 @@ class DeepCrossNet(BaseEstimator, TransformerMixin):
                      self.numeric_value: nv,
                      self.dropout_keep_deep: [1.0] * len(self.dropout_dep),
                      self.train_phase: True}
-        out = self.sess.run([self.out], feed_dict=feed_dict)
+        out = self.sess.run(self.out, feed_dict=feed_dict)
 
         return out
 
