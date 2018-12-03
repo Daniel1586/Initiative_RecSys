@@ -14,7 +14,6 @@ This code is referenced from PaddlePaddle models.
 
 import os
 import sys
-import click
 import random
 import argparse
 import collections
