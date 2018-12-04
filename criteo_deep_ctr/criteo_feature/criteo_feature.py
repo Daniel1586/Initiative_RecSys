@@ -180,8 +180,8 @@ if __name__ == "__main__":
         data_dir = root_dir + '\\criteo_data\\'
         outs_dir = root_dir + '\\criteo_dataout\\'
     else:
-        data_dir = 'criteo_data'
-        outs_dir = 'criteo_dataout'
+        data_dir = ''
+        outs_dir = ''
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--threads", type=int, default=2, help="threads num")
