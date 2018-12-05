@@ -35,7 +35,7 @@ tf.app.flags.DEFINE_string("job_name", '', "One of 'ps', 'worker'")
 tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
 tf.app.flags.DEFINE_integer("num_threads", 16, "Number of threads")
 tf.app.flags.DEFINE_integer("feature_size", 0, "Number of features")
-tf.app.flags.DEFINE_integer("field_size", 0, "Number of fields")
+tf.app.flags.DEFINE_integer("field_size", 39, "Number of fields")
 tf.app.flags.DEFINE_integer("embedding_size", 32, "Embedding size")
 tf.app.flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 tf.app.flags.DEFINE_integer("batch_size", 64, "Number of batch size")
@@ -56,7 +56,10 @@ tf.app.flags.DEFINE_string("servable_model_dir", '', "export servable model for 
 tf.app.flags.DEFINE_boolean("clear_existing_model", False, "clear existing model or not")
 
 
-# 0 1:0.05 2:0.004983 3:0.05 4:0 5:0.021594 6:0.008 7:0.15 8:0.04 9:0.362 10:0.166667 11:0.2 12:0 13:0.04
+# 0 1:0.1 2:0.003322 3:0.44 4:0.02 5:0.001594 6:0.016 7:0.02 8:0.04 9:0.008
+# 10:0.166667 11:0.1 12:0 13:0.08 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1
+# 160:1 162:1 176:1 209:1 227:1 264:1 273:1 312:1 335:1 387:1 395:1 404:1
+# 407:1 427:1 434:1 443:1 466:1 479:1
 def input_fn(filenames, batch_size=32, num_epochs=1, perform_shuffle=False):
     print('Parsing ---- ', filenames)
 
@@ -99,20 +102,23 @@ def model_fn(features, labels, mode, params):
     dropout = map(float, params["dropout"].split(','))
 
     # ----- initial weights ----- #
-    FM_B = tf.get_variable(name='fm_bias', shape=[1], initializer=tf.constant_initializer(0.0))
-    FM_W = tf.get_variable(name='fm_w', shape=[feature_size], initializer=tf.glorot_normal_initializer())
-    FM_V = tf.get_variable(name='fm_v', shape=[feature_size, embedding_size], initializer=tf.glorot_normal_initializer())
+    # [numeric_feature, one-hot categorical_feature]统一做embedding
+    fm_b = tf.get_variable(name='fm_b', shape=[1], initializer=tf.constant_initializer(0.0))
+    fm_w = tf.get_variable(name='fm_w', shape=[feature_size], initializer=tf.glorot_normal_initializer())
+    fm_v = tf.get_variable(name='fm_v', shape=[feature_size, embedding_size],
+                           initializer=tf.glorot_normal_initializer())
 
-    #------build feaure-------
-    feat_ids  = features['feat_ids']
-    feat_ids = tf.reshape(feat_ids,shape=[-1,field_size])
-    feat_vals = features['feat_vals']
-    feat_vals = tf.reshape(feat_vals,shape=[-1,field_size])
+    # ----- reshape feature ----- #
+    feat_ids = features['feat_ids']     # 非零特征位置
+    feat_ids = tf.reshape(feat_ids, shape=[-1, field_size])
+    feat_vals = features['feat_vals']   # 非零特征的值
+    feat_vals = tf.reshape(feat_vals, shape=[-1, field_size])
 
-    #------build f(x)------
+    # ----- define f(x) ----- #
+    print('to be modified')
     with tf.variable_scope("First-order"):
-        feat_wgts = tf.nn.embedding_lookup(FM_W, feat_ids)              # None * F * 1
-        y_w = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals),1)
+        feat_wgts = tf.nn.embedding_lookup(fm_w, feat_ids)              # None * F * 1
+        y_w = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals), 1)
 
     with tf.variable_scope("Second-order"):
         embeddings = tf.nn.embedding_lookup(FM_V, feat_ids)             # None * F * K
