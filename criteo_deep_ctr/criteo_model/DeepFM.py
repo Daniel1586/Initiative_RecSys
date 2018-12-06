@@ -98,8 +98,8 @@ def model_fn(features, labels, mode, params):
     embedding_size = params["embedding_size"]
     l2_reg = params["l2_reg"]
     learning_rate = params["learning_rate"]
-    layers = map(int, params["deep_layers"].split(','))
-    dropout = map(float, params["dropout"].split(','))
+    layers = list(map(int, params["deep_layers"].split(',')))
+    dropout = list(map(float, params["dropout"].split(',')))
 
     # ----- initial weights ----- #
     # [numeric_feature, one-hot categorical_feature]统一做embedding
@@ -109,49 +109,42 @@ def model_fn(features, labels, mode, params):
                            initializer=tf.glorot_normal_initializer())
 
     # ----- reshape feature ----- #
-    feat_ids = features['feat_ids']     # 非零特征位置
+    feat_ids = features['feat_ids']         # 非零特征位置
     feat_ids = tf.reshape(feat_ids, shape=[-1, field_size])
-    feat_vals = features['feat_vals']   # 非零特征的值
+    feat_vals = features['feat_vals']       # 非零特征的值
     feat_vals = tf.reshape(feat_vals, shape=[-1, field_size])
 
     # ----- define f(x) ----- #
-    print('to be modified')
-    with tf.variable_scope("First-order"):
-        feat_wgts = tf.nn.embedding_lookup(fm_w, feat_ids)              # None * F * 1
-        y_w = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals), 1)
+    # FM: y = <w,x> + sum(<vi,vj>xixj)
+    with tf.variable_scope("first-order"):
+        feat_wgts = tf.nn.embedding_lookup(fm_w, feat_ids)              # None * F
+        y_w = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals), 1)       # None * 1, <w,x>
 
-    with tf.variable_scope("Second-order"):
-        embeddings = tf.nn.embedding_lookup(FM_V, feat_ids)             # None * F * K
-        feat_vals = tf.reshape(feat_vals, shape=[-1, field_size, 1])
-        embeddings = tf.multiply(embeddings, feat_vals)                 #vij*xi
-        sum_square = tf.square(tf.reduce_sum(embeddings,1))
-        square_sum = tf.reduce_sum(tf.square(embeddings),1)
-        y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum),1)	# None * 1
+    with tf.variable_scope("second-order"):
+        embeddings = tf.nn.embedding_lookup(fm_v, feat_ids)             # None * F * K, <V>
+        feat_vals = tf.reshape(feat_vals, shape=[-1, field_size, 1])    # None * F * 1, <X>
+        embeddings = tf.multiply(embeddings, feat_vals)                 # None * F * K, <vij*xi>
+        sum_square = tf.square(tf.reduce_sum(embeddings, 1))            # None * K
+        square_sum = tf.reduce_sum(tf.square(embeddings), 1)            # None * K
+        y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum), 1)	    # None * 1, sum(<vi,vj>xixj)
 
-    with tf.variable_scope("Deep-part"):
+    # Deep:
+    with tf.variable_scope("deep-part"):
         if FLAGS.batch_norm:
-            #normalizer_fn = tf.contrib.layers.batch_norm
-            #normalizer_fn = tf.layers.batch_normalization
             if mode == tf.estimator.ModeKeys.TRAIN:
                 train_phase = True
-                #normalizer_params = {'decay': batch_norm_decay, 'center': True, 'scale': True, 'updates_collections': None, 'is_training': True, 'reuse': None}
             else:
                 train_phase = False
-                #normalizer_params = {'decay': batch_norm_decay, 'center': True, 'scale': True, 'updates_collections': None, 'is_training': False, 'reuse': True}
-        else:
-            normalizer_fn = None
-            normalizer_params = None
 
-        deep_inputs = tf.reshape(embeddings,shape=[-1,field_size*embedding_size]) # None * (F*K)
+        deep_inputs = tf.reshape(embeddings, shape=[-1, field_size*embedding_size])     # None * (F*K)
         for i in range(len(layers)):
-            #if FLAGS.batch_norm:
-            #    deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' %i)
-                #normalizer_params.update({'scope': 'bn_%d' %i})
-            deep_inputs = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=layers[i], \
-                #normalizer_fn=normalizer_fn, normalizer_params=normalizer_params, \
-                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='mlp%d' % i)
+            deep_inputs = tf.contrib.layers.fully_connected(
+                inputs=deep_inputs, num_outputs=layers[i], scope='mlp%d' % i,
+                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg))
             if FLAGS.batch_norm:
-                deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' %i)   #放在RELU之后 https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md#bn----before-or-after-relu
+                print('to be modified')
+                deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' % i)
+                #放在RELU之后 https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md#bn----before-or-after-relu
             if mode == tf.estimator.ModeKeys.TRAIN:
                 deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])                              #Apply Dropout after all BN layers and set dropout=0.8(drop_ratio=0.2)
                 #deep_inputs = tf.layers.dropout(inputs=deep_inputs, rate=dropout[i], training=mode == tf.estimator.ModeKeys.TRAIN)
