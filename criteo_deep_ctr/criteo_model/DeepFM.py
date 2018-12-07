@@ -10,21 +10,13 @@ Implementation of DeepFM model with the following features：
 #4 Support export_model for TensorFlow Serving
 """
 
-import shutil
-#import sys
 import os
 import json
 import glob
-from datetime import date, timedelta
-from time import time
-#import gc
-#from multiprocessing import Process
-
-#import math
 import random
-#import pandas as pd
-#import numpy as np
+import shutil
 import tensorflow as tf
+from datetime import date, timedelta
 
 # =================== CMD Arguments for DeepFM =================== #
 FLAGS = tf.app.flags.FLAGS
@@ -34,7 +26,7 @@ tf.app.flags.DEFINE_string("worker_hosts", '', "Comma-separated list of hostname
 tf.app.flags.DEFINE_string("job_name", '', "One of 'ps', 'worker'")
 tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
 tf.app.flags.DEFINE_integer("num_threads", 16, "Number of threads")
-tf.app.flags.DEFINE_integer("feature_size", 0, "Number of features")
+tf.app.flags.DEFINE_integer("feature_size", 490, "Number of features")
 tf.app.flags.DEFINE_integer("field_size", 39, "Number of fields")
 tf.app.flags.DEFINE_integer("embedding_size", 32, "Embedding size")
 tf.app.flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
@@ -43,7 +35,7 @@ tf.app.flags.DEFINE_integer("log_steps", 1000, "save summary every steps")
 tf.app.flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
 tf.app.flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 tf.app.flags.DEFINE_string("loss_type", 'log_loss', "loss type {square_loss, log_loss}")
-tf.app.flags.DEFINE_string("optimizer", 'Adam', "optimizer type {Adam, Adagrad, GD, Momentum}")
+tf.app.flags.DEFINE_string("optimizer", 'Adam', "optimizer type {Adam, Adagrad, Momentum, Ftrl, GD}")
 tf.app.flags.DEFINE_string("deep_layers", '256,128,64', "deep layers")
 tf.app.flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
 tf.app.flags.DEFINE_boolean("batch_norm", False, "perform batch normalization (True or False)")
@@ -142,83 +134,66 @@ def model_fn(features, labels, mode, params):
                 inputs=deep_inputs, num_outputs=layers[i], scope='mlp%d' % i,
                 weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg))
             if FLAGS.batch_norm:
-                print('to be modified')
+                # <<https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md>>
+                # Batch normalization after Relu
                 deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' % i)
-                #放在RELU之后 https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md#bn----before-or-after-relu
             if mode == tf.estimator.ModeKeys.TRAIN:
-                deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])                              #Apply Dropout after all BN layers and set dropout=0.8(drop_ratio=0.2)
-                #deep_inputs = tf.layers.dropout(inputs=deep_inputs, rate=dropout[i], training=mode == tf.estimator.ModeKeys.TRAIN)
+                deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])
 
-        y_deep = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity, \
-                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')
-        y_d = tf.reshape(y_deep,shape=[-1])
-        #sig_wgts = tf.get_variable(name='sigmoid_weights', shape=[layers[-1]], initializer=tf.glorot_normal_initializer())
-        #sig_bias = tf.get_variable(name='sigmoid_bias', shape=[1], initializer=tf.constant_initializer(0.0))
-        #deep_out = tf.nn.xw_plus_b(deep_inputs,sig_wgts,sig_bias,name='deep_out')
+        y_deep = tf.contrib.layers.fully_connected(
+            inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity,
+            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')
+        y_d = tf.reshape(y_deep, shape=[-1])
 
-    with tf.variable_scope("DeepFM-out"):
-        #y_bias = FM_B * tf.ones_like(labels, dtype=tf.float32)  # None * 1  warning;这里不能用label，否则调用predict/export函数会出错，train/evaluate正常；初步判断estimator做了优化，用不到label时不传
-        y_bias = FM_B * tf.ones_like(y_d, dtype=tf.float32)      # None * 1
+    with tf.variable_scope("deepFM-out"):
+        y_bias = fm_b * tf.ones_like(y_d, dtype=tf.float32)      # None * 1
         y = y_bias + y_w + y_v + y_d
-        pred = tf.sigmoid(y)
+        y_pred = tf.sigmoid(y)
 
-    predictions={"prob": pred}
-    export_outputs = {tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY: tf.estimator.export.PredictOutput(predictions)}
-    # Provide an estimator spec for `ModeKeys.PREDICT`
+    # ----- mode: predict/evaluate/train ----- #
+    # predict: 不计算loss/metric; evaluate: 不进行梯度下降和参数更新
+    # Provide an estimator spec for 'ModeKeys.PREDICT'
+    predictions = {"prob": y_pred}
+    export_outputs = {
+        tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:
+            tf.estimator.export.PredictOutput(predictions)}
+
     if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(
-                mode=mode,
-                predictions=predictions,
-                export_outputs=export_outputs)
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
 
-    #------bulid loss------
+    # Provide an estimator spec for 'ModeKeys.EVAL'
     loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=y, labels=labels)) + \
-        l2_reg * tf.nn.l2_loss(FM_W) + \
-        l2_reg * tf.nn.l2_loss(FM_V)
-
-    # Provide an estimator spec for `ModeKeys.EVAL`
+        l2_reg * tf.nn.l2_loss(fm_w) + l2_reg * tf.nn.l2_loss(fm_v)
     eval_metric_ops = {
-        "auc": tf.metrics.auc(labels, pred)
-    }
-    if mode == tf.estimator.ModeKeys.EVAL:
-        return tf.estimator.EstimatorSpec(
-                mode=mode,
-                predictions=predictions,
-                loss=loss,
-                eval_metric_ops=eval_metric_ops)
+        "auc": tf.metrics.auc(labels, y_pred)}
 
-    #------bulid optimizer------
+    if mode == tf.estimator.ModeKeys.EVAL:
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
+                                          eval_metric_ops=eval_metric_ops)
+
+    # Provide an estimator spec for 'ModeKeys.TRAIN'
     if FLAGS.optimizer == 'Adam':
         optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-8)
     elif FLAGS.optimizer == 'Adagrad':
         optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate, initial_accumulator_value=1e-8)
     elif FLAGS.optimizer == 'Momentum':
         optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.95)
-    elif FLAGS.optimizer == 'ftrl':
+    elif FLAGS.optimizer == 'Ftrl':
         optimizer = tf.train.FtrlOptimizer(learning_rate)
-
+    else:
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
     train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
 
-    # Provide an estimator spec for `ModeKeys.TRAIN` modes
     if mode == tf.estimator.ModeKeys.TRAIN:
-        return tf.estimator.EstimatorSpec(
-                mode=mode,
-                predictions=predictions,
-                loss=loss,
-                train_op=train_op)
-
-    # Provide an estimator spec for `ModeKeys.EVAL` and `ModeKeys.TRAIN` modes.
-    #return tf.estimator.EstimatorSpec(
-    #        mode=mode,
-    #        loss=loss,
-    #        train_op=train_op,
-    #        predictions={"prob": pred},
-    #        eval_metric_ops=eval_metric_ops)
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
 
 
+# Implementation of Batch normalization, train/infer
 def batch_norm_layer(x, train_phase, scope_bn):
-    bn_train = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True, updates_collections=None, is_training=True,  reuse=None, scope=scope_bn)
-    bn_infer = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True, updates_collections=None, is_training=False, reuse=True, scope=scope_bn)
+    bn_train = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True,
+                                            updates_collections=None, is_training=True,  reuse=None, scope=scope_bn)
+    bn_infer = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True,
+                                            updates_collections=None, is_training=False, reuse=True, scope=scope_bn)
     z = tf.cond(tf.cast(train_phase, tf.bool), lambda: bn_train, lambda: bn_infer)
     return z
 
@@ -355,8 +330,7 @@ def main(_):
     elif FLAGS.task_mode == 'export':
         feature_spec = {
             'feat_ids': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_ids'),
-            'feat_vals': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_vals')
-        }
+            'feat_vals': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_vals')}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
         deepfm.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
