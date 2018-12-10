@@ -26,7 +26,7 @@ tf.app.flags.DEFINE_string("worker_hosts", '', "Comma-separated list of hostname
 tf.app.flags.DEFINE_string("job_name", '', "One of 'ps', 'worker'")
 tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
 tf.app.flags.DEFINE_integer("num_threads", 16, "Number of threads")
-tf.app.flags.DEFINE_integer("feature_size", 490, "Number of features")
+tf.app.flags.DEFINE_integer("feature_size", 44961, "Number of features")
 tf.app.flags.DEFINE_integer("field_size", 39, "Number of fields")
 tf.app.flags.DEFINE_integer("embedding_size", 32, "Embedding size")
 tf.app.flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
