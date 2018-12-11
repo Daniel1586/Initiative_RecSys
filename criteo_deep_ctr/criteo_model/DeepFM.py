@@ -19,33 +19,34 @@ import tensorflow as tf
 from datetime import date, timedelta
 
 # =================== CMD Arguments for DeepFM =================== #
-FLAGS = tf.app.flags.FLAGS
-tf.app.flags.DEFINE_integer("run_mode", 0, "run mode {0-local, 1-single_dist, 2-multi_dist}")
-tf.app.flags.DEFINE_string("ps_hosts", '', "Comma-separated list of hostname:port pairs")
-tf.app.flags.DEFINE_string("worker_hosts", '', "Comma-separated list of hostname:port pairs")
-tf.app.flags.DEFINE_string("job_name", '', "One of 'ps', 'worker'")
-tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
-tf.app.flags.DEFINE_integer("num_threads", 16, "Number of threads")
-tf.app.flags.DEFINE_integer("feature_size", 44961, "Number of features")
-tf.app.flags.DEFINE_integer("field_size", 39, "Number of fields")
-tf.app.flags.DEFINE_integer("embedding_size", 32, "Embedding size")
-tf.app.flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
-tf.app.flags.DEFINE_integer("batch_size", 64, "Number of batch size")
-tf.app.flags.DEFINE_integer("log_steps", 1000, "save summary every steps")
-tf.app.flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
-tf.app.flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
-tf.app.flags.DEFINE_string("loss_type", 'log_loss', "loss type {square_loss, log_loss}")
-tf.app.flags.DEFINE_string("optimizer", 'Adam', "optimizer type {Adam, Adagrad, Momentum, Ftrl, GD}")
-tf.app.flags.DEFINE_string("deep_layers", '256,128,64', "deep layers")
-tf.app.flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
-tf.app.flags.DEFINE_boolean("batch_norm", False, "perform batch normalization (True or False)")
-tf.app.flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(recommend trying decay=0.9)")
-tf.app.flags.DEFINE_string("task_mode", 'train', "task mode {train, infer, eval, export}")
-tf.app.flags.DEFINE_string("model_dir", '', "model check point dir")
-tf.app.flags.DEFINE_string("data_dir", '', "data dir")
-tf.app.flags.DEFINE_string("flag_dir", '', "flag name for different test time")
-tf.app.flags.DEFINE_string("servable_model_dir", '', "export servable model for TensorFlow Serving")
-tf.app.flags.DEFINE_boolean("clear_existing_model", False, "clear existing model or not")
+flags = tf.app.flags
+flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_dist, 2-multi_dist}")
+flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
+flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
+flags.DEFINE_string("job_name", None, "job name: ps or worker")
+flags.DEFINE_integer("task_index", None, "Index of task within the job")
+flags.DEFINE_integer("num_threads", 4, "Number of threads")
+flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
+flags.DEFINE_string("model_dir", "", "model check point dir")
+flags.DEFINE_string("data_dir", "", "data dir")
+flags.DEFINE_string("flag_dir", "", "flag name for different model")
+flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
+flags.DEFINE_boolean("clear_existed_model", False, "clear existed model or not")
+flags.DEFINE_integer("feature_size", 44961, "Number of features")
+flags.DEFINE_integer("field_size", 39, "Number of fields")
+flags.DEFINE_integer("embedding_size", 32, "Embedding size")
+flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
+flags.DEFINE_integer("batch_size", 64, "Number of batch size")
+flags.DEFINE_integer("log_steps", 1000, "save summary every steps")
+flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
+flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
+flags.DEFINE_string("loss", "log_loss", "{square_loss, log_loss}")
+flags.DEFINE_string("optimizer", 'Adam', "{Adam, Adagrad, Momentum, Ftrl, GD}")
+flags.DEFINE_string("deep_layers", "256,128,64", "deep layers")
+flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
+flags.DEFINE_boolean("batch_norm", False, "perform batch normalization (True or False)")
+flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(decay=0.9)")
+FLAGS = flags.FLAGS
 
 
 # 0 1:0.1 2:0.003322 3:0.44 4:0.02 5:0.001594 6:0.016 7:0.02 8:0.04 9:0.008
@@ -252,28 +253,28 @@ def main(_):
     if FLAGS.flag_dir == "":
         FLAGS.flag_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.flag_dir
+
+    if FLAGS.data_dir == "":    # windows环境测试
+        root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
+        FLAGS.data_dir = root_dir + '\\criteo_dataout\\'
+
     print('task_mode --------- ', FLAGS.task_mode)
     print('model_dir --------- ', FLAGS.model_dir)
     print('data_dir ---------- ', FLAGS.data_dir)
     print('flag_dir ---------- ', FLAGS.flag_dir)
-    print('num_epochs -------- ', FLAGS.num_epochs)
     print('feature_size ------ ', FLAGS.feature_size)
     print('field_size -------- ', FLAGS.field_size)
     print('embedding_size ---- ', FLAGS.embedding_size)
+    print('num_epochs -------- ', FLAGS.num_epochs)
     print('batch_size -------- ', FLAGS.batch_size)
+    print('learning_rate ----- ', FLAGS.learning_rate)
+    print('l2_reg ------------ ', FLAGS.l2_reg)
+    print('loss -------------- ', FLAGS.loss)
+    print('optimizer --------- ', FLAGS.optimizer)
     print('deep_layers ------- ', FLAGS.deep_layers)
     print('dropout ----------- ', FLAGS.dropout)
-    print('loss_type --------- ', FLAGS.loss_type)
-    print('optimizer --------- ', FLAGS.optimizer)
-    print('learning_rate ----- ', FLAGS.learning_rate)
-    print('batch_norm_decay -- ', FLAGS.batch_norm_decay)
     print('batch_norm -------- ', FLAGS.batch_norm)
-    print('l2_reg ------------ ', FLAGS.l2_reg)
-
-    print('========== 2.Check and Print Dataset files...')
-    if FLAGS.data_dir == "":    # windows环境测试
-        root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
-        FLAGS.data_dir = root_dir + '\\criteo_dataout\\'
+    print('batch_norm_decay -- ', FLAGS.batch_norm_decay)
 
     train_files = glob.glob("%s/train*set" % FLAGS.data_dir)
     random.shuffle(train_files)
@@ -283,18 +284,18 @@ def main(_):
     tests_files = glob.glob("%s/tests*set" % FLAGS.data_dir)
     print("tests_files: ", tests_files)
 
-    print('========== 3.Initialized Environment...')
-    if FLAGS.clear_existing_model:
+    print('========== 2.Initialized Environment...')
+    if FLAGS.clear_existed_model:
         try:
             shutil.rmtree(FLAGS.model_dir)
         except Exception as e:
-            print(e, "at clear_existing_model")
+            print(e, "at clear_existed_model")
         else:
-            print("existing model cleaned at %s" % FLAGS.model_dir)
+            print("existed model cleared at %s" % FLAGS.model_dir)
 
     env_set()
 
-    print('========== 4.Build tasks and algorithm model...')
+    print('========== 3.Build tasks and algorithm model...')
     model_params = {
         "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
