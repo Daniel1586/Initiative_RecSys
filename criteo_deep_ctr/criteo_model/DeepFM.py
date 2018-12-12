@@ -20,7 +20,7 @@ from datetime import date, timedelta
 
 # =================== CMD Arguments for DeepFM =================== #
 flags = tf.app.flags
-flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_dist, 2-multi_dist}")
+flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("job_name", None, "job name: ps or worker")
@@ -199,11 +199,11 @@ def batch_norm_layer(x, train_phase, scope_bn):
     return z
 
 
-# Initialized Environment,初始化程序运行环境
-def env_set():
-    if FLAGS.run_mode == 1:        # 单机分布式
+# Initialized Distributed Environment,初始化分布式环境
+def distributed_env_set():
+    if FLAGS.run_mode == 1:     # 单机分布式
         ps_hosts = FLAGS.ps_hosts.split(',')
-        chief_hosts = FLAGS.chief_hosts.split(',')
+        chief_hosts = FLAGS.worker_hosts.split(',')
         task_index = FLAGS.task_index
         job_name = FLAGS.job_name
         print('ps_host ------', ps_hosts)
@@ -221,7 +221,7 @@ def env_set():
         ps_hosts = FLAGS.ps_hosts.split(',')
         worker_hosts = FLAGS.worker_hosts.split(',')
         chief_hosts = worker_hosts[0:1]     # get first worker as chief
-        worker_hosts = worker_hosts[2:]     # the rest as worker
+        worker_hosts = worker_hosts[1:]     # the rest as worker
         task_index = FLAGS.task_index
         job_name = FLAGS.job_name
         print('ps_host ------', ps_hosts)
@@ -249,12 +249,12 @@ def env_set():
 
 
 def main(_):
-    print('========== 1.Check and Print Arguments...')
-    if FLAGS.flag_dir == "":
+    print('==================== 1.Check and Print Arguments...')
+    if FLAGS.flag_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型]
         FLAGS.flag_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.flag_dir
 
-    if FLAGS.data_dir == "":    # windows环境测试
+    if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
         FLAGS.data_dir = root_dir + '\\criteo_dataout\\'
 
@@ -278,40 +278,40 @@ def main(_):
 
     train_files = glob.glob("%s/train*set" % FLAGS.data_dir)
     random.shuffle(train_files)
-    print("train_files: ", train_files)
     valid_files = glob.glob("%s/valid*set" % FLAGS.data_dir)
-    print("valid_files: ", valid_files)
     tests_files = glob.glob("%s/tests*set" % FLAGS.data_dir)
+    print("train_files: ", train_files)
+    print("valid_files: ", valid_files)
     print("tests_files: ", tests_files)
 
-    print('========== 2.Initialized Environment...')
-    if FLAGS.clear_existed_model:
+    print('==================== 2.Initialized Environment...')
+    if FLAGS.clear_existed_model:   # 删除已存在的模型文件
         try:
             shutil.rmtree(FLAGS.model_dir)
         except Exception as e:
             print(e, "at clear_existed_model")
         else:
-            print("existed model cleared at %s" % FLAGS.model_dir)
+            print("existed model cleared at %s folder" % FLAGS.model_dir)
+    distributed_env_set()       # 分布式环境设置
 
-    env_set()
-
-    print('========== 3.Build tasks and algorithm model...')
+    print('==================== 3.Build DeepFM model...')
     model_params = {
         "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
         "embedding_size": FLAGS.embedding_size,
         "learning_rate": FLAGS.learning_rate,
-        "batch_norm_decay": FLAGS.batch_norm_decay,
         "l2_reg": FLAGS.l2_reg,
+        "dropout": FLAGS.dropout,
         "deep_layers": FLAGS.deep_layers,
-        "dropout": FLAGS.dropout
+        "batch_norm_decay": FLAGS.batch_norm_decay
     }
+    session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': 1})
     config = tf.estimator.RunConfig().replace(
-        session_config=tf.ConfigProto(device_count={'GPU': 0, 'CPU': FLAGS.num_threads}),
-        log_step_count_steps=FLAGS.log_steps, save_summary_steps=FLAGS.log_steps)
+        session_config=session_config, log_step_count_steps=FLAGS.log_steps, save_summary_steps=FLAGS.log_steps)
     deepfm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
                                     params=model_params, config=config)
 
+    print('==================== 4.Apply DeepFM model...')
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs))
