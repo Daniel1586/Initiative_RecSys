@@ -177,8 +177,8 @@ if __name__ == "__main__":
     run_mode = 0        # 0: windows环境测试
     if run_mode == 0:
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
-        data_dir = root_dir + '\\criteo_data\\'
-        outs_dir = root_dir + '\\criteo_dataout\\'
+        data_dir = root_dir + '\\criteo_data_raw\\'
+        outs_dir = root_dir + '\\criteo_data_trans\\'
     else:
         data_dir = ''
         outs_dir = ''
@@ -190,9 +190,9 @@ if __name__ == "__main__":
     parser.add_argument("--cutoff", type=int, default=200, help="cutoff long-tailed categorical values")
 
     FLAGS, unparsed = parser.parse_known_args()
-    print('threads ', FLAGS.threads)
-    print('input_dir ', FLAGS.input_dir)
-    print('output_dir ', FLAGS.output_dir)
-    print('cutoff ', FLAGS.cutoff)
+    print('threads ---------- ', FLAGS.threads)
+    print('input_dir -------- ', FLAGS.input_dir)
+    print('output_dir ------- ', FLAGS.output_dir)
+    print('cutoff ----------- ', FLAGS.cutoff)
 
     preprocess(FLAGS.input_dir, FLAGS.output_dir)
