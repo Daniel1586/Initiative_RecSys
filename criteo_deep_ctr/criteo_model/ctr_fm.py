@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 
 """
-<<DeepFM: A Factorization-Machine based Neural Network for CTR Prediction>>
-Implementation of DeepFM model with the following features：
-#1 Input pipeline using Dataset API, Support parallel and prefetch
-#2 Train pipeline using Custom Estimator by rewriting model_fn
-#3 Support distributed training by TF_CONFIG
-#4 Support export_model for TensorFlow Serving
+<<FM: Factorization Machines./Factorization Machines with libFM.>>
+Implementation of FM model with the following features：
+#1 Input pipeline using Dataset API, Support parallel and prefetch.
+#2 Train pipeline using Custom Estimator by rewriting model_fn.
+#3 Support distributed training by TF_CONFIG.
+#4 Support export_model for TensorFlow Serving.
 """
 
 import os
@@ -18,9 +18,10 @@ import shutil
 import tensorflow as tf
 from datetime import date, timedelta
 
-# =================== CMD Arguments for DeepFM =================== #
+# =================== CMD Arguments for FM model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
+flags.DEFINE_boolean("clear_mode", False, "clear existed model or not")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("job_name", None, "job name: ps or worker")
@@ -31,21 +32,15 @@ flags.DEFINE_string("model_dir", "", "model check point dir")
 flags.DEFINE_string("data_dir", "", "data dir")
 flags.DEFINE_string("flag_dir", "", "flag name for different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
-flags.DEFINE_boolean("clear_existed_model", False, "clear existed model or not")
-flags.DEFINE_integer("feature_size", 44961, "Number of features")
-flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("embedding_size", 32, "Embedding size")
+flags.DEFINE_integer("feature_size", 490, "Number of features[numeric + one-hot feature]")
+flags.DEFINE_integer("embedding_size", 8, "Embedding size[length of hidden vector of xi/xj]")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 1000, "save summary every steps")
+flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
+flags.DEFINE_string("optimizer", 'Adam', "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
 flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
-flags.DEFINE_string("loss", "log_loss", "{square_loss, log_loss}")
-flags.DEFINE_string("optimizer", 'Adam', "{Adam, Adagrad, Momentum, Ftrl, GD}")
-flags.DEFINE_string("deep_layers", "256,128,64", "deep layers")
-flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
-flags.DEFINE_boolean("batch_norm", False, "perform batch normalization (True or False)")
-flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(decay=0.9)")
 FLAGS = flags.FLAGS
 
 
@@ -53,7 +48,7 @@ FLAGS = flags.FLAGS
 # 10:0.166667 11:0.1 12:0 13:0.08 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1
 # 160:1 162:1 176:1 209:1 227:1 264:1 273:1 312:1 335:1 387:1 395:1 404:1
 # 407:1 427:1 434:1 443:1 466:1 479:1
-def input_fn(filenames, batch_size=32, num_epochs=1, perform_shuffle=False):
+def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
     def decode_dataset(line):
@@ -248,6 +243,25 @@ def distributed_env_set():
         os.environ['TF_CONFIG'] = json.dumps(tf_config)
 
 
+# print initial information of paras,打印初始化参数信息
+def _init_info(train_files, valid_files, tests_files):
+    print('task_mode --------- ', FLAGS.task_mode)
+    print('model_dir --------- ', FLAGS.model_dir)
+    print('data_dir ---------- ', FLAGS.data_dir)
+    print('flag_dir ---------- ', FLAGS.flag_dir)
+    print('feature_size ------ ', FLAGS.feature_size)
+    print('embedding_size ---- ', FLAGS.embedding_size)
+    print('num_epochs -------- ', FLAGS.num_epochs)
+    print('batch_size -------- ', FLAGS.batch_size)
+    print('loss -------------- ', FLAGS.loss)
+    print('optimizer --------- ', FLAGS.optimizer)
+    print('learning_rate ----- ', FLAGS.learning_rate)
+    print('l2_reg ------------ ', FLAGS.l2_reg)
+    print("train_files: ", train_files)
+    print("valid_files: ", valid_files)
+    print("tests_files: ", tests_files)
+
+
 def main(_):
     print('==================== 1.Check and Print Arguments...')
     if FLAGS.flag_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型]
@@ -258,31 +272,11 @@ def main(_):
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
         FLAGS.data_dir = root_dir + '\\criteo_dataout\\'
 
-    print('task_mode --------- ', FLAGS.task_mode)
-    print('model_dir --------- ', FLAGS.model_dir)
-    print('data_dir ---------- ', FLAGS.data_dir)
-    print('flag_dir ---------- ', FLAGS.flag_dir)
-    print('feature_size ------ ', FLAGS.feature_size)
-    print('field_size -------- ', FLAGS.field_size)
-    print('embedding_size ---- ', FLAGS.embedding_size)
-    print('num_epochs -------- ', FLAGS.num_epochs)
-    print('batch_size -------- ', FLAGS.batch_size)
-    print('learning_rate ----- ', FLAGS.learning_rate)
-    print('l2_reg ------------ ', FLAGS.l2_reg)
-    print('loss -------------- ', FLAGS.loss)
-    print('optimizer --------- ', FLAGS.optimizer)
-    print('deep_layers ------- ', FLAGS.deep_layers)
-    print('dropout ----------- ', FLAGS.dropout)
-    print('batch_norm -------- ', FLAGS.batch_norm)
-    print('batch_norm_decay -- ', FLAGS.batch_norm_decay)
-
     train_files = glob.glob("%s/train*set" % FLAGS.data_dir)
     random.shuffle(train_files)
     valid_files = glob.glob("%s/valid*set" % FLAGS.data_dir)
     tests_files = glob.glob("%s/tests*set" % FLAGS.data_dir)
-    print("train_files: ", train_files)
-    print("valid_files: ", valid_files)
-    print("tests_files: ", tests_files)
+    _init_info(train_files, valid_files, tests_files)
 
     print('==================== 2.Initialized Environment...')
     if FLAGS.clear_existed_model:   # 删除已存在的模型文件
