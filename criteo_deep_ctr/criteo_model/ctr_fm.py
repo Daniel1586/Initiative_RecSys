@@ -33,6 +33,7 @@ flags.DEFINE_string("data_dir", "", "data dir")
 flags.DEFINE_string("flag_dir", "", "flag name for different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
 flags.DEFINE_integer("feature_size", 490, "Number of features[numeric + one-hot feature]")
+flags.DEFINE_integer("field_size", 39, "Number of fields")
 flags.DEFINE_integer("embedding_size", 8, "Embedding size[length of hidden vector of xi/xj]")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
@@ -48,7 +49,7 @@ FLAGS = flags.FLAGS
 # 10:0.166667 11:0.1 12:0 13:0.08 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1
 # 160:1 162:1 176:1 209:1 227:1 264:1 273:1 312:1 335:1 387:1 395:1 404:1
 # 407:1 427:1 434:1 443:1 466:1 479:1
-def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
+def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
     def decode_dataset(line):
@@ -57,8 +58,8 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
         splits = tf.string_split(columns.values[1:], ':')
         id_vals = tf.reshape(splits.values, splits.dense_shape)
         feat_ids, feat_vals = tf.split(id_vals, num_or_size_splits=2, axis=1)
-        feat_ids = tf.string_to_number(feat_ids, out_type=tf.int32)
-        feat_vals = tf.string_to_number(feat_vals, out_type=tf.float32)
+        feat_ids = tf.string_to_number(feat_ids, out_type=tf.int32)         # [field_size * 1]
+        feat_vals = tf.string_to_number(feat_vals, out_type=tf.float32)     # [field_size * 1]
         return {"feat_ids": feat_ids, "feat_vals": feat_vals}, labels
 
     # Extract lines from input files using the Dataset API, can pass one filename or filename list
@@ -72,13 +73,13 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     # epochs from blending together.
     dataset = dataset.repeat(num_epochs)
     dataset = dataset.batch(batch_size)
-
     iterator = dataset.make_one_shot_iterator()
-    batch_features, batch_labels = iterator.get_next()
+    batch_features, batch_labels = iterator.get_next()      # [batch_size * field_size * 1]
+
     return batch_features, batch_labels
 
 
-def model_fn(features, labels, mode, params):
+def model_fn_fm(features, labels, mode, params):
 
     # ----- hyper-parameters ----- #
     field_size = params["field_size"]
@@ -270,7 +271,7 @@ def main(_):
 
     if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
-        FLAGS.data_dir = root_dir + '\\criteo_dataout\\'
+        FLAGS.data_dir = root_dir + '\\criteo_data_trans\\'
 
     train_files = glob.glob("%s/train*set" % FLAGS.data_dir)
     random.shuffle(train_files)
@@ -279,7 +280,7 @@ def main(_):
     _init_info(train_files, valid_files, tests_files)
 
     print('==================== 2.Initialized Environment...')
-    if FLAGS.clear_existed_model:   # 删除已存在的模型文件
+    if FLAGS.clear_mode:   # 删除已存在的模型文件
         try:
             shutil.rmtree(FLAGS.model_dir)
         except Exception as e:
@@ -288,22 +289,21 @@ def main(_):
             print("existed model cleared at %s folder" % FLAGS.model_dir)
     distributed_env_set()           # 分布式环境设置
 
-    print('==================== 3.Build DeepFM model...')
+    print('==================== 3.Build FM model...')
     model_params = {
-        "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
         "embedding_size": FLAGS.embedding_size,
         "learning_rate": FLAGS.learning_rate,
         "l2_reg": FLAGS.l2_reg,
-        "dropout": FLAGS.dropout,
-        "deep_layers": FLAGS.deep_layers,
-        "batch_norm_decay": FLAGS.batch_norm_decay
     }
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_threads})
     config = tf.estimator.RunConfig().replace(
         session_config=session_config, log_step_count_steps=FLAGS.log_steps, save_summary_steps=FLAGS.log_steps)
-    deepfm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
-                                    params=model_params, config=config)
+
+    _x1, _x0 = input_fn_fm(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs)
+
+    fm = tf.estimator.Estimator(model_fn=model_fn_fm, model_dir=FLAGS.model_dir,
+                                params=model_params, config=config)
 
     print('==================== 4.Apply DeepFM model...')
     if FLAGS.task_mode == 'train':
