@@ -82,41 +82,41 @@ def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
 def model_fn_fm(features, labels, mode, params):
 
     # ----- hyper-parameters ----- #
+    l2_reg = params["l2_reg"]
     field_size = params["field_size"]
     feature_size = params["feature_size"]
     embedding_size = params["embedding_size"]
-    l2_reg = params["l2_reg"]
     learning_rate = params["learning_rate"]
 
     # ----- initial weights ----- #
     # [numeric_feature, one-hot categorical_feature]统一做embedding
     fm_b = tf.get_variable(name='fm_b', shape=[1], initializer=tf.constant_initializer(0.0))
-    fm_w = tf.get_variable(name='fm_w', shape=[feature_size, 1], initializer=tf.glorot_normal_initializer())
+    fm_w = tf.get_variable(name='fm_w', shape=[feature_size], initializer=tf.glorot_normal_initializer())
     fm_v = tf.get_variable(name='fm_v', shape=[feature_size, embedding_size],
                            initializer=tf.glorot_normal_initializer())
 
     # ----- reshape feature ----- #
     feat_idx = features['feat_idx']         # 非零特征位置[batch_size * field_size * 1]
-    feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # batch_size * F
+    feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # Batch * F
     feat_val = features['feat_val']         # 非零特征的值[batch_size * field_size * 1]
-    feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # batch_size * F
+    feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # Batch * F
 
     # ----- define f(x) ----- #
-    # FM: y = <w,x> + sum(<vi,vj>xixj)
+    # FM: y = w0 + <w,x> + sum(<vi,vj>xixj)
     with tf.variable_scope("first-order"):
-        feat_wgt = tf.nn.embedding_lookup(fm_w, feat_idx)               # None * F
-        y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # None * 1, <w,x>
+        feat_wgt = tf.nn.embedding_lookup(fm_w, feat_idx)               # Batch * F
+        y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # Batch * 1, <w,x>
 
     with tf.variable_scope("second-order"):
-        embeddings = tf.nn.embedding_lookup(fm_v, feat_idx)             # None * F * K, <V>
-        feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # None * F * 1, <X>
-        embeddings = tf.multiply(embeddings, feat_vals)                 # None * F * K, <vij*xi>
-        sum_square = tf.square(tf.reduce_sum(embeddings, 1))            # None * K
-        square_sum = tf.reduce_sum(tf.square(embeddings), 1)            # None * K
-        y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum), 1)	    # None * 1, sum(<vi,vj>xixj)
+        embeddings = tf.nn.embedding_lookup(fm_v, feat_idx)             # Batch * F * K, <V>
+        feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # Batch * F * 1, <X>
+        embeddings = tf.multiply(embeddings, feat_vals)                 # Batch * F * K, <vij*xi>
+        sum_square = tf.square(tf.reduce_sum(embeddings, 1))            # Batch * K
+        square_sum = tf.reduce_sum(tf.square(embeddings), 1)            # Batch * K
+        y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum), 1)	    # Batch * 1, sum(<vi,vj>xixj)
 
-    with tf.variable_scope("deepFM-out"):
-        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)      # None * 1
+    with tf.variable_scope("FM-out"):
+        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)      # Batch * 1
         y_hat = y_bias + y_w + y_v
         y_pred = tf.nn.sigmoid(y_hat)
 
@@ -137,8 +137,7 @@ def model_fn_fm(features, labels, mode, params):
     else:
         pass
 
-    eval_metric_ops = {
-        "auc": tf.metrics.auc(labels, y_pred)}
+    eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
 
     if mode == tf.estimator.ModeKeys.EVAL:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
@@ -270,9 +269,11 @@ def main(_):
                                 params=model_params, config=config)
 
     print('==================== 4.Apply DeepFM model...')
+    max_step = 7025    # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
-            input_fn=lambda: input_fn_fm(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs))
+            input_fn=lambda: input_fn_fm(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
+            max_steps=max_step)
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn_fm(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=1000, throttle_secs=1200)
