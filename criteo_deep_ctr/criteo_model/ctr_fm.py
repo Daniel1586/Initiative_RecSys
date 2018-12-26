@@ -21,7 +21,7 @@ from datetime import date, timedelta
 # =================== CMD Arguments for FM model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
-flags.DEFINE_boolean("clear_mode", False, "clear existed model or not")
+flags.DEFINE_boolean("clear_mode", True, "clear existed model or not")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("job_name", None, "job name: ps or worker")
@@ -38,7 +38,7 @@ flags.DEFINE_integer("embedding_size", 8, "Embedding size[length of hidden vecto
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 1000, "save summary every steps")
-flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
+flags.DEFINE_string("loss", "square_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", 'Adam', "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
 flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
@@ -49,7 +49,7 @@ FLAGS = flags.FLAGS
 # 10:0.166667 11:0.1 12:0 13:0.08 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1
 # 160:1 162:1 176:1 209:1 227:1 264:1 273:1 312:1 335:1 387:1 395:1 404:1
 # 407:1 427:1 434:1 443:1 466:1 479:1
-def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
+def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
     print('Parsing ----------- ', filenames)
 
     def dataset_etl(line):
@@ -127,18 +127,16 @@ def model_fn_fm(features, labels, mode, params):
     export_outputs = {
         tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:
             tf.estimator.export.PredictOutput(predictions)}
-
     if mode == tf.estimator.ModeKeys.PREDICT:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
 
     # Provide an estimator spec for 'ModeKeys.EVAL'
     if FLAGS.loss == "log_loss":
-        loss = tf.losses.log_loss(labels, y_pred) + l2_reg * tf.nn.l2_loss(fm_w)
+        loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) +\
+               l2_reg * tf.nn.l2_loss(fm_w) + l2_reg * tf.nn.l2_loss(fm_v)
     else:
-        pass
-
+        loss = tf.reduce_mean(tf.square(labels-y_hat))
     eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
-
     if mode == tf.estimator.ModeKeys.EVAL:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
                                           eval_metric_ops=eval_metric_ops)
@@ -269,11 +267,11 @@ def main(_):
                                 params=model_params, config=config)
 
     print('==================== 4.Apply DeepFM model...')
-    max_step = 7025    # data_num * num_epochs / batch_size
+    train_step = 7025*5     # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn_fm(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
-            max_steps=max_step)
+            max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn_fm(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=1000, throttle_secs=1200)
