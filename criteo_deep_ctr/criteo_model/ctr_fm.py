@@ -37,8 +37,8 @@ flags.DEFINE_integer("field_size", 39, "Number of fields")
 flags.DEFINE_integer("embedding_size", 8, "Embedding size[length of hidden vector of xi/xj]")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
-flags.DEFINE_integer("log_steps", 1000, "save summary every steps")
-flags.DEFINE_string("loss", "square_loss", "{log_loss, square_loss}")
+flags.DEFINE_integer("log_steps", 5000, "save summary every steps")
+flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", 'Adam', "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
 flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
@@ -49,7 +49,7 @@ FLAGS = flags.FLAGS
 # 10:0.166667 11:0.1 12:0 13:0.08 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1
 # 160:1 162:1 176:1 209:1 227:1 264:1 273:1 312:1 335:1 387:1 395:1 404:1
 # 407:1 427:1 434:1 443:1 466:1 479:1
-def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
+def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
     def dataset_etl(line):
@@ -266,8 +266,8 @@ def main(_):
     fm = tf.estimator.Estimator(model_fn=model_fn_fm, model_dir=FLAGS.model_dir,
                                 params=model_params, config=config)
 
-    print('==================== 4.Apply DeepFM model...')
-    train_step = 7025*5     # data_num * num_epochs / batch_size
+    print('==================== 4.Apply FM model...')
+    train_step = 28120*10     # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn_fm(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
