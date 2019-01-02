@@ -5,7 +5,7 @@
 Preprocess Criteo dataset. This dataset was used for the Display Advertising
 Challenge (https://www.kaggle.com/c/criteo-display-ad-challenge).
 --数据解压: train.csv 45840617条样本, test.csv 6042135条样本
---这里train只取5W 条数据, test只取1W 条数据测试
+--这里train只取20W 条数据, test只取10W 条数据测试
 This code is referenced from PaddlePaddle models.
 (https://github.com/PaddlePaddle/models/blob/develop/legacy/deep_fm/preprocess.py)
 --For numeric features, clipped and normalized.
