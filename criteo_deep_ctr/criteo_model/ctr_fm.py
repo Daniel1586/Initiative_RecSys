@@ -5,7 +5,7 @@
 <<FM: Factorization Machines./Factorization Machines with libFM.>>
 Implementation of FM model with the following features：
 #1 Input pipeline using Dataset API, Support parallel and prefetch.
-#2 Train pipeline using Custom Estimator by rewriting model_fn.
+#2 Train pipeline using Custom Estimator by rewriting model_fn_fm.
 #3 Support distributed training by TF_CONFIG.
 #4 Support export_model for TensorFlow Serving.
 """
@@ -277,10 +277,10 @@ def main(_):
             steps=None, start_delay_secs=1000, throttle_secs=1200)
         tf.estimator.train_and_evaluate(fm, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
-        fm.evaluate(input_fn=lambda: input_fn_fm(valid_files, num_epochs=1, batch_size=FLAGS.batch_size))
+        fm.evaluate(input_fn=lambda: input_fn_fm(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == 'infer':
         preds = fm.predict(
-            input_fn=lambda: input_fn_fm(tests_files, num_epochs=1, batch_size=FLAGS.batch_size),
+            input_fn=lambda: input_fn_fm(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
         with open(FLAGS.data_dir+"/pred.txt", "w") as fo:
             for prob in preds:
