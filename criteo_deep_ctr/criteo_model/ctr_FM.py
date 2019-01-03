@@ -5,7 +5,7 @@
 <<FM: Factorization Machines./Factorization Machines with libFM.>>
 Implementation of FM model with the following features：
 #1 Input pipeline using Dataset API, Support parallel and prefetch.
-#2 Train pipeline using Custom Estimator by rewriting model_fn_fm.
+#2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
 #4 Support export_model for TensorFlow Serving.
 """
@@ -63,8 +63,8 @@ def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
         return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
 
     # extract lines from input files[one filename or filename list] using the Dataset API,
-    # multi-thread pre-process then prefetch some certain amount of data[10000]
-    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=10).prefetch(10000)
+    # multi-thread pre-process then prefetch some certain amount of data[500000]
+    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=10).prefetch(500000)
 
     # randomize the input data with a window of 256 elements (read into memory)
     if perform_shuffle:
