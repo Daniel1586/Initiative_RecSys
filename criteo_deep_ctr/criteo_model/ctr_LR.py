@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-<<FM: Factorization Machines./Factorization Machines with libFM.>>
-Implementation of FM model with the following features：
+<<LR: Logistic Regression.>>
+Implementation of LR model with the following features：
 #1 Input pipeline using Dataset API, Support parallel and prefetch.
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
@@ -18,7 +18,7 @@ import shutil
 import tensorflow as tf
 from datetime import date, timedelta
 
-# =================== CMD Arguments for FM model =================== #
+# =================== CMD Arguments for LR model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
 flags.DEFINE_boolean("clear_mode", True, "clear existed model or not")
@@ -34,7 +34,6 @@ flags.DEFINE_string("flag_dir", "", "flag name for different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
 flags.DEFINE_integer("feature_size", 490, "Number of features[numeric + one-hot feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("embedding_size", 8, "Embedding size[length of hidden vector of xi/xj]")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 5000, "save summary every steps")
@@ -49,7 +48,7 @@ FLAGS = flags.FLAGS
 # 10:0.166667 11:0.1 12:0 13:0.08 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1
 # 160:1 162:1 176:1 209:1 227:1 264:1 273:1 312:1 335:1 387:1 395:1 404:1
 # 407:1 427:1 434:1 443:1 466:1 479:1
-def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
+def input_fn_lr(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
     def dataset_etl(line):
@@ -63,8 +62,8 @@ def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
         return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
 
     # extract lines from input files[one filename or filename list] using the Dataset API,
-    # multi-thread pre-process then prefetch some certain amount of data[10000]
-    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=10).prefetch(10000)
+    # multi-thread pre-process then prefetch some certain amount of data[500000]
+    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=10).prefetch(500000)
 
     # randomize the input data with a window of 256 elements (read into memory)
     if perform_shuffle:
@@ -79,21 +78,18 @@ def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     return batch_features, batch_labels
 
 
-def model_fn_fm(features, labels, mode, params):
+def model_fn_lr(features, labels, mode, params):
 
     # ----- hyper-parameters ----- #
     l2_reg = params["l2_reg"]
     field_size = params["field_size"]
     feature_size = params["feature_size"]
-    embedding_size = params["embedding_size"]
     learning_rate = params["learning_rate"]
 
     # ----- initial weights ----- #
-    # [numeric_feature, one-hot categorical_feature]统一做embedding
+    # [numeric_feature, one-hot categorical_feature]
     fm_b = tf.get_variable(name='fm_b', shape=[1], initializer=tf.constant_initializer(0.0))
     fm_w = tf.get_variable(name='fm_w', shape=[feature_size], initializer=tf.glorot_normal_initializer())
-    fm_v = tf.get_variable(name='fm_v', shape=[feature_size, embedding_size],
-                           initializer=tf.glorot_normal_initializer())
 
     # ----- reshape feature ----- #
     feat_idx = features['feat_idx']         # 非零特征位置[batch_size * field_size * 1]
@@ -102,22 +98,14 @@ def model_fn_fm(features, labels, mode, params):
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # Batch * F
 
     # ----- define f(x) ----- #
-    # FM: y = w0 + <w,x> + sum(<vi,vj>xixj)
+    # LR: y = w0 + <w,x> + sum(<vi,vj>xixj)
     with tf.variable_scope("first-order"):
         feat_wgt = tf.nn.embedding_lookup(fm_w, feat_idx)               # Batch * F
         y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # Batch * 1, <w,x>
 
-    with tf.variable_scope("second-order"):
-        embeddings = tf.nn.embedding_lookup(fm_v, feat_idx)             # Batch * F * K, <V>
-        feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # Batch * F * 1, <X>
-        embeddings = tf.multiply(embeddings, feat_vals)                 # Batch * F * K, <vij*xi>
-        sum_square = tf.square(tf.reduce_sum(embeddings, 1))            # Batch * K
-        square_sum = tf.reduce_sum(tf.square(embeddings), 1)            # Batch * K
-        y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum), 1)	    # Batch * 1, sum(<vi,vj>xixj)
-
-    with tf.variable_scope("FM-out"):
-        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)      # Batch * 1
-        y_hat = y_bias + y_w + y_v
+    with tf.variable_scope("LR-out"):
+        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)             # Batch * 1
+        y_hat = y_bias + y_w
         y_pred = tf.nn.sigmoid(y_hat)
 
     # ----- mode: predict/evaluate/train ----- #
@@ -133,7 +121,7 @@ def model_fn_fm(features, labels, mode, params):
     # Provide an estimator spec for 'ModeKeys.EVAL'
     if FLAGS.loss == "log_loss":
         loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) +\
-               l2_reg * tf.nn.l2_loss(fm_w) + l2_reg * tf.nn.l2_loss(fm_v)
+               l2_reg * tf.nn.l2_loss(fm_w)
     else:
         loss = tf.reduce_mean(tf.square(labels-y_hat))
     eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
@@ -214,7 +202,6 @@ def _init_info(train_files, valid_files, tests_files):
     print('data_dir ---------- ', FLAGS.data_dir)
     print('flag_dir ---------- ', FLAGS.flag_dir)
     print('feature_size ------ ', FLAGS.feature_size)
-    print('embedding_size ---- ', FLAGS.embedding_size)
     print('num_epochs -------- ', FLAGS.num_epochs)
     print('batch_size -------- ', FLAGS.batch_size)
     print('loss -------------- ', FLAGS.loss)
@@ -252,35 +239,34 @@ def main(_):
             print("existed model cleared at %s folder" % FLAGS.model_dir)
     distributed_env_set()           # 分布式环境设置
 
-    print('==================== 3.Build FM model...')
+    print('==================== 3.Build LR model...')
     model_params = {
         "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
-        "embedding_size": FLAGS.embedding_size,
         "learning_rate": FLAGS.learning_rate,
         "l2_reg": FLAGS.l2_reg,
     }
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_threads})
     config = tf.estimator.RunConfig().replace(
         session_config=session_config, log_step_count_steps=FLAGS.log_steps, save_summary_steps=FLAGS.log_steps)
-    fm = tf.estimator.Estimator(model_fn=model_fn_fm, model_dir=FLAGS.model_dir,
+    lr = tf.estimator.Estimator(model_fn=model_fn_lr, model_dir=FLAGS.model_dir,
                                 params=model_params, config=config)
 
-    print('==================== 4.Apply FM model...')
+    print('==================== 4.Apply LR model...')
     train_step = 28120*10     # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
-            input_fn=lambda: input_fn_fm(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
+            input_fn=lambda: input_fn_lr(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
-            input_fn=lambda: input_fn_fm(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
+            input_fn=lambda: input_fn_lr(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=1000, throttle_secs=1200)
-        tf.estimator.train_and_evaluate(fm, train_spec, eval_spec)
+        tf.estimator.train_and_evaluate(lr, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
-        fm.evaluate(input_fn=lambda: input_fn_fm(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        lr.evaluate(input_fn=lambda: input_fn_lr(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == 'infer':
-        preds = fm.predict(
-            input_fn=lambda: input_fn_fm(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
+        preds = lr.predict(
+            input_fn=lambda: input_fn_lr(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
         with open(FLAGS.data_dir+"/pred.txt", "w") as fo:
             for prob in preds:
@@ -290,7 +276,7 @@ def main(_):
             'feat_ids': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_ids'),
             'feat_vals': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_vals')}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        fm.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
+        lr.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
