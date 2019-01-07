@@ -62,8 +62,8 @@ def input_fn_lr(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
         return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
 
     # extract lines from input files[one filename or filename list] using the Dataset API,
-    # multi-thread pre-process then prefetch some certain amount of data[500000]
-    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=10).prefetch(500000)
+    # multi-thread pre-process then prefetch some certain amount of data[100000]
+    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=10).prefetch(100000)
 
     # randomize the input data with a window of 256 elements (read into memory)
     if perform_shuffle:
