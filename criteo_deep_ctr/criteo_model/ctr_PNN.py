@@ -40,6 +40,7 @@ flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 5000, "save summary every steps")
 flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", 'Adam', "{Adam, Adagrad, Momentum, Ftrl, GD}")
+flags.DEFINE_string("model_type", 'Inner', "model type {FNN, Inner, Outer}")
 flags.DEFINE_string("deep_layers", "256,128,64", "deep layers")
 flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
 flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
@@ -95,6 +96,7 @@ def model_fn_pnn(features, labels, mode, params):
 
     # ----- initial weights ----- #
     # [numeric_feature, one-hot categorical_feature]统一做embedding
+    print('to be modified')
     pnn_bias = tf.get_variable(name='pnn_bias', shape=[1], initializer=tf.constant_initializer(0.0))
     emb_bias = tf.get_variable(name='emb_bias', shape=[feature_size], initializer=tf.glorot_normal_initializer())
     emb_weig = tf.get_variable(name='emb_weig', shape=[feature_size, embedding_size],
@@ -107,20 +109,30 @@ def model_fn_pnn(features, labels, mode, params):
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # Batch * F
 
     # ----- define f(x) ----- #
-    # Linear-part: y = w0 + <w,x> + sum(<vi,vj>xixj)
     with tf.variable_scope("linear-part"):
         feat_wgt = tf.nn.embedding_lookup(emb_bias, feat_idx)           # Batch * F
-        y_linear = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)    # Batch * 1, <w,x>
+        y_linear = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)    # Batch * 1
 
     with tf.variable_scope("embedding-layer"):
-        embeddings = tf.nn.embedding_lookup(emb_weig, feat_idx)         # Batch * F * K, <V>
-        feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # Batch * F * 1, <X>
-        embeddings = tf.multiply(embeddings, feat_vals)                 # Batch * F * K, <vij*xi>
-        sum_square = tf.square(tf.reduce_sum(embeddings, 1))            # Batch * K
-        square_sum = tf.reduce_sum(tf.square(embeddings), 1)            # Batch * K
-        y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum), 1)	    # Batch * 1, sum(<vi,vj>xixj)
+        embeddings = tf.nn.embedding_lookup(emb_weig, feat_idx)         # Batch * F * K
+        feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # Batch * F * 1
+        embeddings = tf.multiply(embeddings, feat_vals)                 # Batch * F * K
 
-    with tf.variable_scope("FM-out"):
+    with tf.variable_scope("product-layer"):
+        if FLAGS.model_type == "Inner":
+            rows = []
+            cols = []
+            for ii in range(field_size-1):
+                for jj in range(ii+1, field_size):
+                    rows.append(ii)
+                    cols.append(jj)
+            f_ii = tf.gather(embeddings, rows, axis=1)
+            f_jj = tf.gather(embeddings, cols, axis=1)
+            inner = tf.reshape(tf.reduce_mean(f_ii*f_jj, [-1]), [-1, num_pairs])
+            deep_input = tf.concat([tf.reshape(embeddings, shape=[-1, field_size*embedding_size]), inner], 1)
+
+    with tf.variable_scope("deep-part"):
+        pass
         y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)      # Batch * 1
         y_hat = y_bias + y_w + y_v
         y_pred = tf.nn.sigmoid(y_hat)
