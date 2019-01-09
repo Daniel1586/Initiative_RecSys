@@ -35,6 +35,7 @@ flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorF
 flags.DEFINE_integer("feature_size", 490, "Number of features[numeric + one-hot feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
 flags.DEFINE_integer("embedding_size", 8, "Embedding size[length of hidden vector of xi/xj]")
+flags.DEFINE_integer("embedding_size", 8, "Embedding size[length of hidden vector of xi/xj]")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 5000, "save summary every steps")
@@ -90,17 +91,20 @@ def model_fn_pnn(features, labels, mode, params):
     feature_size = params["feature_size"]
     embedding_size = params["embedding_size"]
     learning_rate = params["learning_rate"]
+    # l1神经元数量等于D1长度
+    print('to be modified')
     layers = list(map(int, params["deep_layers"].split(',')))
     dropout = list(map(float, params["dropout"].split(',')))
     num_pairs = field_size * (field_size - 1) / 2
 
     # ----- initial weights ----- #
     # [numeric_feature, one-hot categorical_feature]统一做embedding
-    print('to be modified')
-    pnn_bias = tf.get_variable(name='pnn_bias', shape=[1], initializer=tf.constant_initializer(0.0))
-    emb_bias = tf.get_variable(name='emb_bias', shape=[feature_size], initializer=tf.glorot_normal_initializer())
-    emb_weig = tf.get_variable(name='emb_weig', shape=[feature_size, embedding_size],
-                               initializer=tf.glorot_normal_initializer())
+    feat_bias = tf.get_variable(name='feat_bias', shape=[1], initializer=tf.constant_initializer(0.0))
+    feat_embd = tf.get_variable(name='feat_embd', shape=[feature_size, embedding_size],
+                                initializer=tf.glorot_normal_initializer())
+    product_z = tf.get_variable(name='product_z', )
+    weights['product-linear'] = tf.Variable(tf.random_normal(
+        [self.deep_init_size, self.field_size, self.embedding_size], 0.0, 0.01))
 
     # ----- reshape feature ----- #
     feat_idx = features['feat_idx']         # 非零特征位置[batch_size * field_size * 1]
@@ -109,12 +113,8 @@ def model_fn_pnn(features, labels, mode, params):
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # Batch * F
 
     # ----- define f(x) ----- #
-    with tf.variable_scope("linear-part"):
-        feat_wgt = tf.nn.embedding_lookup(emb_bias, feat_idx)           # Batch * F
-        y_linear = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)    # Batch * 1
-
     with tf.variable_scope("embedding-layer"):
-        embeddings = tf.nn.embedding_lookup(emb_weig, feat_idx)         # Batch * F * K
+        embeddings = tf.nn.embedding_lookup(feat_embd, feat_idx)        # Batch * F * K
         feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # Batch * F * 1
         embeddings = tf.multiply(embeddings, feat_vals)                 # Batch * F * K
 
