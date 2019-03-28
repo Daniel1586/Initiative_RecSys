@@ -10,6 +10,7 @@ This code is referenced from PaddlePaddle models.
 (https://github.com/PaddlePaddle/models/blob/develop/legacy/deep_fm/preprocess.py)
 --For numeric features, clipped and normalized.
 --For categorical features, removed long-tailed data appearing less than 200 times.
+########## TF Version: 1.8.0 ##########
 """
 
 import os
