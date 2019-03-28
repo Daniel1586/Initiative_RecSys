@@ -8,6 +8,7 @@ Implementation of LR model with the following features：
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
 #4 Support export_model for TensorFlow Serving.
+########## TF Version: 1.8.0 ##########
 """
 
 import os
@@ -44,26 +45,27 @@ flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 FLAGS = flags.FLAGS
 
 
-# 0 1:0.1 2:0.003322 3:0.44 4:0.02 5:0.001594 6:0.016 7:0.02 8:0.04 9:0.008
-# 10:0.166667 11:0.1 12:0 13:0.08 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1
-# 160:1 162:1 176:1 209:1 227:1 264:1 273:1 312:1 335:1 387:1 395:1 404:1
-# 407:1 427:1 434:1 443:1 466:1 479:1
+# 0 1:0.1 2:0.003322 3:0.44 4:0.02 5:0.001594 6:0.016 7:0.02
+# 8:0.04 9:0.008 10:0.166667 11:0.1 12:0 13:0.08
+# 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1 160:1 162:1 176:1 209:1 227:1
+# 264:1 273:1 312:1 335:1 387:1 395:1 404:1 407:1 427:1 434:1 443:1 466:1 479:1
 def input_fn_lr(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
     def dataset_etl(line):
+        # line = 0 1:0.1 2:0.003322 3:0.44
         feat_raw = tf.string_split([line], ' ')
         labels = tf.string_to_number(feat_raw.values[0], out_type=tf.float32)
         splits = tf.string_split(feat_raw.values[1:], ':')
         idx_val = tf.reshape(splits.values, splits.dense_shape)
-        feat_idx, feat_val = tf.split(idx_val, num_or_size_splits=2, axis=1)
-        feat_idx = tf.string_to_number(feat_idx, out_type=tf.int32)         # [field_size * 1]
-        feat_val = tf.string_to_number(feat_val, out_type=tf.float32)       # [field_size * 1]
+        feat_idx, feat_val = tf.split(idx_val, num_or_size_splits=2, axis=1)    # 切割张量
+        feat_idx = tf.string_to_number(feat_idx, out_type=tf.int32)             # [field_size * 1]
+        feat_val = tf.string_to_number(feat_val, out_type=tf.float32)           # [field_size * 1]
         return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
 
     # extract lines from input files[one filename or filename list] using the Dataset API,
-    # multi-thread pre-process then prefetch some certain amount of data[100000]
-    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=10).prefetch(100000)
+    # multi-thread pre-process then prefetch some certain amount of data[6400]
+    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(6400)
 
     # randomize the input data with a window of 256 elements (read into memory)
     if perform_shuffle:
@@ -148,15 +150,15 @@ def model_fn_lr(features, labels, mode, params):
 
 # Initialized Distributed Environment,初始化分布式环境
 def distributed_env_set():
-    if FLAGS.run_mode == 1:     # 单机分布式
+    if FLAGS.run_mode == 1:         # 单机分布式
         ps_hosts = FLAGS.ps_hosts.split(',')
         chief_hosts = FLAGS.worker_hosts.split(',')
-        task_index = FLAGS.task_index
         job_name = FLAGS.job_name
-        print('ps_host ------', ps_hosts)
-        print('chief_hosts --', chief_hosts)
-        print('job_name -----', job_name)
-        print('task_index ---', str(task_index))
+        task_index = FLAGS.task_index
+        print('ps_host --------', ps_hosts)
+        print('chief_hosts ----', chief_hosts)
+        print('job_name -------', job_name)
+        print('task_index -----', str(task_index))
         # 无worker参数
         tf_config = {
             'cluster': {'chief': chief_hosts, 'ps': ps_hosts},
@@ -196,7 +198,7 @@ def distributed_env_set():
 
 
 # print initial information of paras,打印初始化参数信息
-def _init_info(train_files, valid_files, tests_files):
+def _print_init_info(train_files, valid_files, tests_files):
     print('task_mode --------- ', FLAGS.task_mode)
     print('model_dir --------- ', FLAGS.model_dir)
     print('data_dir ---------- ', FLAGS.data_dir)
@@ -214,30 +216,29 @@ def _init_info(train_files, valid_files, tests_files):
 
 
 def main(_):
-    print('==================== 1.Check and Print Arguments...')
-    if FLAGS.flag_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型]
+    print('==================== 1.Check Arguments and Print Init Info...')
+    if FLAGS.flag_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型,程序执行日期前一天:20190327]
         FLAGS.flag_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.flag_dir
-
     if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
-        FLAGS.data_dir = root_dir + '\\criteo_data_trans\\'
+        FLAGS.data_dir = root_dir + '\\criteo_data_set\\'
 
-    train_files = glob.glob("%s/train*set" % FLAGS.data_dir)
+    train_files = glob.glob("%s/train*set" % FLAGS.data_dir)    # 获取指定目录下train文件
     random.shuffle(train_files)
-    valid_files = glob.glob("%s/valid*set" % FLAGS.data_dir)
-    tests_files = glob.glob("%s/tests*set" % FLAGS.data_dir)
-    _init_info(train_files, valid_files, tests_files)
+    valid_files = glob.glob("%s/valid*set" % FLAGS.data_dir)    # 获取指定目录下valid文件
+    tests_files = glob.glob("%s/tests*set" % FLAGS.data_dir)    # 获取指定目录下tests文件
+    _print_init_info(train_files, valid_files, tests_files)
 
-    print('==================== 2.Initialized Environment...')
-    if FLAGS.clear_mode:   # 删除已存在的模型文件
+    print('==================== 2.Clear Existed Model and Initialized Distributed Environment...')
+    if FLAGS.clear_mode:        # 删除已存在的模型文件
         try:
-            shutil.rmtree(FLAGS.model_dir)
+            shutil.rmtree(FLAGS.model_dir)      # 递归删除目录下的目录及文件
         except Exception as e:
-            print(e, "at clear_existed_model")
+            print(e, "At clear_existed_model")
         else:
-            print("existed model cleared at %s folder" % FLAGS.model_dir)
-    distributed_env_set()           # 分布式环境设置
+            print("Existed model cleared at %s folder" % FLAGS.model_dir)
+    distributed_env_set()       # 分布式环境设置
 
     print('==================== 3.Build LR model...')
     model_params = {
@@ -247,13 +248,14 @@ def main(_):
         "l2_reg": FLAGS.l2_reg,
     }
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_threads})
-    config = tf.estimator.RunConfig().replace(
-        session_config=session_config, log_step_count_steps=FLAGS.log_steps, save_summary_steps=FLAGS.log_steps)
+    config = tf.estimator.RunConfig().replace(session_config=session_config,
+                                              save_summary_steps=FLAGS.log_steps,
+                                              log_step_count_steps=FLAGS.log_steps)
     lr = tf.estimator.Estimator(model_fn=model_fn_lr, model_dir=FLAGS.model_dir,
                                 params=model_params, config=config)
 
     print('==================== 4.Apply LR model...')
-    train_step = 28120*10     # data_num * num_epochs / batch_size
+    train_step = 89962*10/64    # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn_lr(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
