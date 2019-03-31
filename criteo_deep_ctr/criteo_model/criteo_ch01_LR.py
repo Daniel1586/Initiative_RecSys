@@ -202,6 +202,7 @@ def _print_init_info(train_files, valid_files, tests_files):
     print('model_dir --------- ', FLAGS.model_dir)
     print('data_dir ---------- ', FLAGS.data_dir)
     print('flag_dir ---------- ', FLAGS.flag_dir)
+    print('field_size -------- ', FLAGS.field_size)
     print('feature_size ------ ', FLAGS.feature_size)
     print('num_epochs -------- ', FLAGS.num_epochs)
     print('batch_size -------- ', FLAGS.batch_size)
