@@ -33,9 +33,9 @@ flags.DEFINE_string("model_dir", "", "model check point dir")
 flags.DEFINE_string("data_dir", "", "data dir")
 flags.DEFINE_string("flag_dir", "", "flag name for different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
-flags.DEFINE_integer("feature_size", 490, "Number of features[numeric + one-hot feature]")
+flags.DEFINE_integer("feature_size", 922, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
+flags.DEFINE_integer("num_epochs", 50, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 5000, "save summary every steps")
 flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
@@ -53,14 +53,13 @@ def input_fn_lr(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
     def dataset_etl(line):
-        # line = 0 1:0.1 2:0.003322 3:0.44
         feat_raw = tf.string_split([line], ' ')
         labels = tf.string_to_number(feat_raw.values[0], out_type=tf.float32)
         splits = tf.string_split(feat_raw.values[1:], ':')
         idx_val = tf.reshape(splits.values, splits.dense_shape)
         feat_idx, feat_val = tf.split(idx_val, num_or_size_splits=2, axis=1)    # 切割张量
-        feat_idx = tf.string_to_number(feat_idx, out_type=tf.int32)             # [field_size * 1]
-        feat_val = tf.string_to_number(feat_val, out_type=tf.float32)           # [field_size * 1]
+        feat_idx = tf.string_to_number(feat_idx, out_type=tf.int32)             # [field_size, 1]
+        feat_val = tf.string_to_number(feat_val, out_type=tf.float32)           # [field_size, 1]
         return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
 
     # extract lines from input files[one filename or filename list] using the Dataset API,
@@ -75,7 +74,7 @@ def input_fn_lr(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     dataset = dataset.repeat(num_epochs)
     dataset = dataset.batch(batch_size)
     iterator = dataset.make_one_shot_iterator()
-    batch_features, batch_labels = iterator.get_next()      # [batch_size * field_size * 1]
+    batch_features, batch_labels = iterator.get_next()      # [batch_size, field_size, 1]
 
     return batch_features, batch_labels
 
@@ -94,21 +93,21 @@ def model_fn_lr(features, labels, mode, params):
     fm_w = tf.get_variable(name='fm_w', shape=[feature_size], initializer=tf.glorot_normal_initializer())
 
     # ----- reshape feature ----- #
-    feat_idx = features['feat_idx']         # 非零特征位置[batch_size * field_size * 1]
-    feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # Batch * F
-    feat_val = features['feat_val']         # 非零特征的值[batch_size * field_size * 1]
-    feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # Batch * F
+    feat_idx = features['feat_idx']         # 非零特征位置[batch_size, field_size, 1]
+    feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # [Batch, Field]
+    feat_val = features['feat_val']         # 非零特征的值[batch_size, field_size, 1]
+    feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
     # ----- define f(x) ----- #
-    # LR: y = w0 + <w,x> + sum(<vi,vj>xixj)
-    with tf.variable_scope("first-order"):
-        feat_wgt = tf.nn.embedding_lookup(fm_w, feat_idx)               # Batch * F
-        y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # Batch * 1, <w,x>
+    # LR: y = w0 + sum<wi,xi>
+    with tf.variable_scope("First-order"):
+        feat_wgt = tf.nn.embedding_lookup(fm_w, feat_idx)               # [Batch, Field]
+        y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # [Batch]
 
     with tf.variable_scope("LR-out"):
-        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)             # Batch * 1
-        y_hat = y_bias + y_w
-        y_pred = tf.nn.sigmoid(y_hat)
+        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)             # [Batch]
+        y_hat = y_bias + y_w                                            # [Batch]
+        y_pred = tf.nn.sigmoid(y_hat)                                   # [Batch]
 
     # ----- mode: predict/evaluate/train ----- #
     # predict: 不计算loss/metric; evaluate: 不进行梯度下降和参数更新
@@ -125,7 +124,7 @@ def model_fn_lr(features, labels, mode, params):
         loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) +\
                l2_reg * tf.nn.l2_loss(fm_w)
     else:
-        loss = tf.reduce_mean(tf.square(labels-y_hat))
+        loss = tf.reduce_mean(tf.square(labels-y_pred))
     eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
     if mode == tf.estimator.ModeKeys.EVAL:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
@@ -218,7 +217,7 @@ def _print_init_info(train_files, valid_files, tests_files):
 def main(_):
     print('==================== 1.Check Arguments and Print Init Info...')
     if FLAGS.flag_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.flag_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.flag_dir = 'LR_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.flag_dir
     if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
@@ -255,7 +254,7 @@ def main(_):
                                 params=model_params, config=config)
 
     print('==================== 4.Apply LR model...')
-    train_step = 89962*10/64    # data_num * num_epochs / batch_size
+    train_step = 89962*FLAGS.num_epochs/FLAGS.batch_size    # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn_lr(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
@@ -270,13 +269,13 @@ def main(_):
         preds = lr.predict(
             input_fn=lambda: input_fn_lr(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
-        with open(FLAGS.data_dir+"/pred.txt", "w") as fo:
+        with open(FLAGS.data_dir+"/tests_pred.txt", "w") as fo:
             for prob in preds:
                 fo.write("%f\n" % (prob['prob']))
     elif FLAGS.task_mode == 'export':
         feature_spec = {
-            'feat_ids': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_ids'),
-            'feat_vals': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_vals')}
+            'feat_idx': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_idx'),
+            'feat_val': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_val')}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
         lr.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
