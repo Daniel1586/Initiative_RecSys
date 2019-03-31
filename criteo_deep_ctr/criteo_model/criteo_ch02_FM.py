@@ -50,7 +50,7 @@ FLAGS = flags.FLAGS
 # 8:0.04 9:0.008 10:0.166667 11:0.1 12:0 13:0.08
 # 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1 160:1 162:1 176:1 209:1 227:1
 # 264:1 273:1 312:1 335:1 387:1 395:1 404:1 407:1 427:1 434:1 443:1 466:1 479:1
-def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
+def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
     def dataset_etl(line):
@@ -80,7 +80,7 @@ def input_fn_fm(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     return batch_features, batch_labels
 
 
-def model_fn_fm(features, labels, mode, params):
+def model_fn(features, labels, mode, params):
 
     # ----- hyper-parameters ----- #
     l2_reg = params["l2_reg"]
@@ -264,24 +264,24 @@ def main(_):
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-    fm = tf.estimator.Estimator(model_fn=model_fn_fm, model_dir=FLAGS.model_dir,
+    fm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
                                 params=model_params, config=config)
 
     print('==================== 4.Apply FM model...')
     train_step = 89962*FLAGS.num_epochs/FLAGS.batch_size    # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
-            input_fn=lambda: input_fn_fm(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
+            input_fn=lambda: input_fn(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
-            input_fn=lambda: input_fn_fm(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
+            input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=1000, throttle_secs=1200)
         tf.estimator.train_and_evaluate(fm, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
-        fm.evaluate(input_fn=lambda: input_fn_fm(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        fm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == 'infer':
         preds = fm.predict(
-            input_fn=lambda: input_fn_fm(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
+            input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
         with open(FLAGS.data_dir+"/tests_pred.txt", "w") as fo:
             for prob in preds:
