@@ -33,10 +33,10 @@ flags.DEFINE_string("model_dir", "", "model check point dir")
 flags.DEFINE_string("data_dir", "", "data dir")
 flags.DEFINE_string("flag_dir", "", "flag name for different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
-flags.DEFINE_integer("feature_size", 922, "Number of features")
+flags.DEFINE_integer("feature_size", 1842, "Number of features")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("embedding_size", 32, "Embedding size")
-flags.DEFINE_integer("num_epochs", 50, "Number of epochs")
+flags.DEFINE_integer("embedding_size", 10, "Embedding size")
+flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 5000, "save summary every steps")
 flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
@@ -122,8 +122,7 @@ def model_fn(features, labels, mode, params):
         square_sum = tf.reduce_sum(tf.square(embeddings), 1)            # [Batch, K]
         y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum), 1)     # [Batch]
 
-    # Deep:
-    with tf.variable_scope("Deep-part"):
+    with tf.variable_scope("Deep-layer"):
         if FLAGS.batch_norm:
             if mode == tf.estimator.ModeKeys.TRAIN:
                 train_phase = True
@@ -319,14 +318,14 @@ def main(_):
                                 params=model_params, config=config)
 
     print('==================== 4.Apply DeepFM model...')
-    train_step = 89962*FLAGS.num_epochs/FLAGS.batch_size    # data_num * num_epochs / batch_size
+    train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
-            steps=None, start_delay_secs=1000, throttle_secs=1200)
+            steps=None, start_delay_secs=200, throttle_secs=300)
         tf.estimator.train_and_evaluate(fm, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
         fm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
