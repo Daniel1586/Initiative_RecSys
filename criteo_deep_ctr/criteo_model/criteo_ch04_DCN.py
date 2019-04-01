@@ -33,10 +33,10 @@ flags.DEFINE_string("model_dir", "", "model check point dir")
 flags.DEFINE_string("data_dir", "", "data dir")
 flags.DEFINE_string("flag_dir", "", "flag name for different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
-flags.DEFINE_integer("feature_size", 922, "Number of features")
+flags.DEFINE_integer("feature_size", 1842, "Number of features")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("embedding_size", 32, "Embedding size")
-flags.DEFINE_integer("num_epochs", 50, "Number of epochs")
+flags.DEFINE_integer("embedding_size", 10, "Embedding size")
+flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 5000, "save summary every steps")
 flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
@@ -113,20 +113,20 @@ def model_fn(features, labels, mode, params):
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
     # ----- define f(x) ----- #
-    with tf.variable_scope("Embed_layer"):
+    with tf.variable_scope("Embed-layer"):
         embeddings = tf.nn.embedding_lookup(embed_w, feat_idx)              # [Batch, Field, K]
         feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])         # [Batch, Field, 1]
         embeddings = tf.multiply(embeddings, feat_vals)                     # [Batch, Field, K]
         x0 = tf.reshape(embeddings, shape=[-1, field_size*embedding_size])  # [Batch, Field*K]
 
-    with tf.variable_scope("Cross_layer"):
+    with tf.variable_scope("Cross-layer"):
         xl = x0
         for l in range(cross_layers):
             wl = tf.reshape(cross_w[l], shape=[-1, 1])      # [Field*K,1]
             xlw = tf.matmul(xl, wl)                         # [Batch, 1]
             xl = x0 * xlw + cross_b[l]                      # [Batch, Field*K]
 
-    with tf.variable_scope("Deep-part"):
+    with tf.variable_scope("Deep-layer"):
         if FLAGS.batch_norm:
             if mode == tf.estimator.ModeKeys.TRAIN:
                 train_phase = True
@@ -135,10 +135,10 @@ def model_fn(features, labels, mode, params):
         else:
             train_phase = True
 
-        deep_inputs = tf.reshape(embeddings, shape=[-1, field_size*embedding_size])     # [Batch, Field*K]
-        for i in range(len(layers)):
+        deep_inputs = x0        # [Batch, Field*K]
+        for i in range(len(deep_layers)):
             deep_inputs = tf.contrib.layers.fully_connected(
-                inputs=deep_inputs, num_outputs=layers[i], scope='mlp_%d' % i,
+                inputs=deep_inputs, num_outputs=deep_layers[i], scope='mlp_%d' % i,
                 weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg))
             if FLAGS.batch_norm:
                 # <<https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md>>
@@ -147,14 +147,12 @@ def model_fn(features, labels, mode, params):
             if mode == tf.estimator.ModeKeys.TRAIN:
                 deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])
 
+    with tf.variable_scope("DCN-out"):
+        x_stack = tf.concat([xl, deep_inputs], 1)
         y_deep = tf.contrib.layers.fully_connected(
-            inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity,
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')
-        y_d = tf.reshape(y_deep, shape=[-1])
-
-    with tf.variable_scope("DeepFM-out"):
-        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)     # [Batch]
-        y_hat = y_bias + y_w + y_v + y_d                        # [Batch]
+            inputs=x_stack, num_outputs=1, activation_fn=tf.identity,
+            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='comb_layer')
+        y_hat = tf.reshape(y_deep, shape=[-1])                  # [Batch]
         y_pred = tf.nn.sigmoid(y_hat)                           # [Batch]
 
     # ----- mode: predict/evaluate/train ----- #
@@ -169,10 +167,12 @@ def model_fn(features, labels, mode, params):
 
     # Provide an estimator spec for 'ModeKeys.EVAL'
     if FLAGS.loss == "log_loss":
-        loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) +\
-               l2_reg * tf.nn.l2_loss(fm_w) + l2_reg * tf.nn.l2_loss(fm_v)
+        loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) \
+               + l2_reg * tf.nn.l2_loss(embed_w) + l2_reg * tf.nn.l2_loss(cross_b) \
+               + l2_reg * tf.nn.l2_loss(cross_w)
     else:
-        loss = tf.reduce_mean(tf.square(labels-y_pred))
+        loss = tf.reduce_mean(tf.square(labels-y_pred)) + l2_reg * tf.nn.l2_loss(embed_w) \
+               + l2_reg * tf.nn.l2_loss(cross_b) + l2_reg * tf.nn.l2_loss(cross_w)
     eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
     if mode == tf.estimator.ModeKeys.EVAL:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
@@ -312,6 +312,7 @@ def main(_):
         "l2_reg": FLAGS.l2_reg,
         "dropout": FLAGS.dropout,
         "deep_layers": FLAGS.deep_layers,
+        "cross_layers": FLAGS.cross_layers,
         "batch_norm_decay": FLAGS.batch_norm_decay
     }
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_threads})
@@ -322,14 +323,14 @@ def main(_):
                                 params=model_params, config=config)
 
     print('==================== 4.Apply DCN model...')
-    train_step = 89962*FLAGS.num_epochs/FLAGS.batch_size    # data_num * num_epochs / batch_size
+    train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
-            steps=None, start_delay_secs=1000, throttle_secs=1200)
+            steps=None, start_delay_secs=200, throttle_secs=300)
         tf.estimator.train_and_evaluate(fm, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
         fm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
