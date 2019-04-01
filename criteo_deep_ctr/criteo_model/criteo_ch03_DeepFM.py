@@ -314,8 +314,8 @@ def main(_):
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-    fm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
-                                params=model_params, config=config)
+    deepfm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
+                                    params=model_params, config=config)
 
     print('==================== 4.Apply DeepFM model...')
     train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
@@ -326,11 +326,11 @@ def main(_):
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=200, throttle_secs=300)
-        tf.estimator.train_and_evaluate(fm, train_spec, eval_spec)
+        tf.estimator.train_and_evaluate(deepfm, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
-        fm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        deepfm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == 'infer':
-        preds = fm.predict(
+        preds = deepfm.predict(
             input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
         with open(FLAGS.data_dir+"/tests_pred.txt", "w") as fo:
@@ -341,7 +341,7 @@ def main(_):
             'feat_idx': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_idx'),
             'feat_val': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_val')}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        fm.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
+        deepfm.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
