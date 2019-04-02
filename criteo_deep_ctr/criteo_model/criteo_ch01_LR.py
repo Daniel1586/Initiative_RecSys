@@ -218,7 +218,7 @@ def _print_init_info(train_files, valid_files, tests_files):
 def main(_):
     print('==================== 1.Check Arguments and Print Init Info...')
     if FLAGS.mark_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.mark_dir = 'LR_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.mark_dir = 'ch01_LR_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.mark_dir
     if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
