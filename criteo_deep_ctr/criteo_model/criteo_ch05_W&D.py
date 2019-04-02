@@ -47,9 +47,19 @@ flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 flags.DEFINE_string("deep_layers", "256,128,64", "deep layers")
 flags.DEFINE_integer("cross_layers", 3, "cross layers, polynomial degree")
 flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
-flags.DEFINE_boolean("batch_norm", False, "perform batch normalization (True or False)")
-flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(decay=0.9)")
 FLAGS = flags.FLAGS
+
+# There are 13 integer features and 26 categorical features
+C_COLUMNS = ['I' + str(i) for i in range(1, 14)]
+D_COLUMNS = ['C' + str(i) for i in range(14, 40)]
+LABEL_COLUMN = "is_click"
+CSV_COLUMNS = [LABEL_COLUMN] + C_COLUMNS + D_COLUMNS
+# Columns Defaults
+CSV_COLUMN_DEFAULTS = [[0.0]]
+C_COLUMN_DEFAULTS = [[0.0] for i in range(13)]
+D_COLUMN_DEFAULTS = [[0] for i in range(26)]
+CSV_COLUMN_DEFAULTS = CSV_COLUMN_DEFAULTS + C_COLUMN_DEFAULTS + D_COLUMN_DEFAULTS
+print(CSV_COLUMN_DEFAULTS)
 
 
 # 0 1:0.1 2:0.003322 3:0.44 4:0.02 5:0.001594 6:0.016 7:0.02
@@ -86,124 +96,23 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     return batch_features, batch_labels
 
 
-def model_fn(features, labels, mode, params):
+def build_feature():
+    # numeric_feature
+    # 1 { continuous base columns }
+    deep_cbc = [tf.feature_column.numeric_column(colname) for colname in C_COLUMNS]
 
-    # ----- hyper-parameters ----- #
-    l2_reg = params["l2_reg"]
-    field_size = params["field_size"]
-    feature_size = params["feature_size"]
-    embedding_size = params["embedding_size"]
-    learning_rate = params["learning_rate"]
-    deep_layers = list(map(int, params["deep_layers"].split(',')))
-    cross_layers = params['cross_layers']
-    dropout = list(map(float, params["dropout"].split(',')))
+    # 2 { categorical base columns }
+    deep_dbc = [tf.feature_column.categorical_column_with_identity(key=colname, num_buckets=10000, default_value=0) for
+                colname in D_COLUMNS]
 
-    # ----- initial weights ----- #
-    # [numeric_feature, one-hot categorical_feature]统一做embedding
-    embed_w = tf.get_variable(name='embed_w', shape=[feature_size, embedding_size],
-                              initializer=tf.glorot_normal_initializer())
-    cross_b = tf.get_variable(name='cross_b', shape=[cross_layers, field_size*embedding_size],
-                              initializer=tf.glorot_uniform_initializer())
-    cross_w = tf.get_variable(name='cross_w', shape=[cross_layers, field_size*embedding_size],
-                              initializer=tf.glorot_uniform_initializer())
+    # 3 { embedding columns }
+    deep_emb = [tf.feature_column.embedding_column(c, dimension=FLAGS.embedding_size) for c in deep_dbc]
 
-    # ----- reshape feature ----- #
-    feat_idx = features['feat_idx']         # 非零特征位置[batch_size, field_size, 1]
-    feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # [Batch, Field]
-    feat_val = features['feat_val']         # 非零特征的值[batch_size, field_size, 1]
-    feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
+    # 3 { wide columns and deep columns }
+    wide_columns = deep_cbc + deep_dbc
+    deep_columns = deep_cbc + deep_emb
 
-    # ----- define f(x) ----- #
-    with tf.variable_scope("Embed-layer"):
-        embeddings = tf.nn.embedding_lookup(embed_w, feat_idx)              # [Batch, Field, K]
-        feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])         # [Batch, Field, 1]
-        embeddings = tf.multiply(embeddings, feat_vals)                     # [Batch, Field, K]
-        x0 = tf.reshape(embeddings, shape=[-1, field_size*embedding_size])  # [Batch, Field*K]
-
-    with tf.variable_scope("Cross-layer"):
-        xl = x0
-        for l in range(cross_layers):
-            wl = tf.reshape(cross_w[l], shape=[-1, 1])      # [Field*K,1]
-            xlw = tf.matmul(xl, wl)                         # [Batch, 1]
-            xl = x0 * xlw + cross_b[l]                      # [Batch, Field*K]
-
-    with tf.variable_scope("Deep-layer"):
-        if FLAGS.batch_norm:
-            if mode == tf.estimator.ModeKeys.TRAIN:
-                train_phase = True
-            else:
-                train_phase = False
-        else:
-            train_phase = True
-
-        deep_inputs = x0        # [Batch, Field*K]
-        for i in range(len(deep_layers)):
-            deep_inputs = tf.contrib.layers.fully_connected(
-                inputs=deep_inputs, num_outputs=deep_layers[i], scope='mlp_%d' % i,
-                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg))
-            if FLAGS.batch_norm:
-                # <<https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md>>
-                # Batch normalization after Relu
-                deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' % i)
-            if mode == tf.estimator.ModeKeys.TRAIN:
-                deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])
-
-    with tf.variable_scope("DCN-out"):
-        x_stack = tf.concat([xl, deep_inputs], 1)
-        y_deep = tf.contrib.layers.fully_connected(
-            inputs=x_stack, num_outputs=1, activation_fn=tf.identity,
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='comb_layer')
-        y_hat = tf.reshape(y_deep, shape=[-1])                  # [Batch]
-        y_pred = tf.nn.sigmoid(y_hat)                           # [Batch]
-
-    # ----- mode: predict/evaluate/train ----- #
-    # predict: 不计算loss/metric; evaluate: 不进行梯度下降和参数更新
-    # Provide an estimator spec for 'ModeKeys.PREDICT'
-    predictions = {"prob": y_pred}
-    export_outputs = {
-        tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:
-            tf.estimator.export.PredictOutput(predictions)}
-    if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
-
-    # Provide an estimator spec for 'ModeKeys.EVAL'
-    if FLAGS.loss == "log_loss":
-        loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) \
-               + l2_reg * tf.nn.l2_loss(embed_w) + l2_reg * tf.nn.l2_loss(cross_b) \
-               + l2_reg * tf.nn.l2_loss(cross_w)
-    else:
-        loss = tf.reduce_mean(tf.square(labels-y_pred)) + l2_reg * tf.nn.l2_loss(embed_w) \
-               + l2_reg * tf.nn.l2_loss(cross_b) + l2_reg * tf.nn.l2_loss(cross_w)
-    eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
-    if mode == tf.estimator.ModeKeys.EVAL:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
-                                          eval_metric_ops=eval_metric_ops)
-
-    # Provide an estimator spec for 'ModeKeys.TRAIN'
-    if FLAGS.optimizer == 'Adam':
-        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-8)
-    elif FLAGS.optimizer == 'Adagrad':
-        optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate, initial_accumulator_value=1e-8)
-    elif FLAGS.optimizer == 'Momentum':
-        optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.95)
-    elif FLAGS.optimizer == 'Ftrl':
-        optimizer = tf.train.FtrlOptimizer(learning_rate)
-    else:
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
-    train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
-
-    if mode == tf.estimator.ModeKeys.TRAIN:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
-
-
-# Implementation of Batch normalization, train/infer
-def batch_norm_layer(x, train_phase, scope_bn):
-    bn_train = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True,
-                                            updates_collections=None, is_training=True,  reuse=None, scope=scope_bn)
-    bn_infer = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True,
-                                            updates_collections=None, is_training=False, reuse=True, scope=scope_bn)
-    z = tf.cond(tf.cast(train_phase, tf.bool), lambda: bn_train, lambda: bn_infer)
-    return z
+    return wide_columns, deep_columns
 
 
 # Initialized Distributed Environment,初始化分布式环境
@@ -272,8 +181,6 @@ def _print_init_info(train_files, valid_files, tests_files):
     print('l2_reg ------------ ', FLAGS.l2_reg)
     print('deep_layers ------- ', FLAGS.deep_layers)
     print('dropout ----------- ', FLAGS.dropout)
-    print('batch_norm -------- ', FLAGS.batch_norm)
-    print('batch_norm_decay -- ', FLAGS.batch_norm_decay)
     print("train_files: ", train_files)
     print("valid_files: ", valid_files)
     print("tests_files: ", tests_files)
