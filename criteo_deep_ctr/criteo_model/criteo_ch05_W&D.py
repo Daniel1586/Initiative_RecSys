@@ -19,29 +19,30 @@ import shutil
 import tensorflow as tf
 from datetime import date, timedelta
 
-# =================== CMD Arguments for DCN model =================== #
+# =================== CMD Arguments for W&D model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
-flags.DEFINE_boolean("clear_mode", True, "clear existed model or not")
+flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
+flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
+flags.DEFINE_string("model_type", "wide", "model type {wide, deep, wide_deep}")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
-flags.DEFINE_string("job_name", None, "job name: ps or worker")
+flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_index", None, "Index of task within the job")
 flags.DEFINE_integer("num_threads", 4, "Number of threads")
-flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
-flags.DEFINE_string("model_dir", "", "model check point dir")
-flags.DEFINE_string("data_dir", "", "data dir")
-flags.DEFINE_string("flag_dir", "", "flag name for different model")
+flags.DEFINE_string("data_dir", "", "Data dir")
+flags.DEFINE_string("model_dir", "", "Model check point dir")
+flags.DEFINE_string("mark_dir", "", "Mark different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
 flags.DEFINE_integer("feature_size", 1842, "Number of features")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
 flags.DEFINE_integer("embedding_size", 10, "Embedding size")
 flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
-flags.DEFINE_integer("log_steps", 5000, "save summary every steps")
+flags.DEFINE_integer("log_steps", 5000, "Save summary every steps")
 flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
-flags.DEFINE_string("optimizer", 'Adam', "{Adam, Adagrad, Momentum, Ftrl, GD}")
-flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
+flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
+flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
 flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 flags.DEFINE_string("deep_layers", "256,128,64", "deep layers")
 flags.DEFINE_integer("cross_layers", 3, "cross layers, polynomial degree")
@@ -207,7 +208,7 @@ def batch_norm_layer(x, train_phase, scope_bn):
 
 # Initialized Distributed Environment,初始化分布式环境
 def distributed_env_set():
-    if FLAGS.run_mode == 1:     # 单机分布式
+    if FLAGS.run_mode == 1:         # 单机分布式
         ps_hosts = FLAGS.ps_hosts.split(',')
         chief_hosts = FLAGS.worker_hosts.split(',')
         job_name = FLAGS.job_name
@@ -257,11 +258,11 @@ def distributed_env_set():
 # print initial information of paras,打印初始化参数信息
 def _print_init_info(train_files, valid_files, tests_files):
     print('task_mode --------- ', FLAGS.task_mode)
-    print('model_dir --------- ', FLAGS.model_dir)
     print('data_dir ---------- ', FLAGS.data_dir)
-    print('flag_dir ---------- ', FLAGS.flag_dir)
-    print('field_size -------- ', FLAGS.field_size)
+    print('model_dir --------- ', FLAGS.model_dir)
+    print('mark_dir ---------- ', FLAGS.mark_dir)
     print('feature_size ------ ', FLAGS.feature_size)
+    print('field_size -------- ', FLAGS.field_size)
     print('embedding_size ---- ', FLAGS.embedding_size)
     print('num_epochs -------- ', FLAGS.num_epochs)
     print('batch_size -------- ', FLAGS.batch_size)
@@ -280,9 +281,9 @@ def _print_init_info(train_files, valid_files, tests_files):
 
 def main(_):
     print('==================== 1.Check Arguments and Print Init Info...')
-    if FLAGS.flag_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.flag_dir = 'DCN_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
-    FLAGS.model_dir = FLAGS.model_dir + FLAGS.flag_dir
+    if FLAGS.mark_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型,程序执行日期前一天:20190327]
+        FLAGS.mark_dir = 'ch05_W_D_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+    FLAGS.model_dir = FLAGS.model_dir + FLAGS.mark_dir
     if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
         FLAGS.data_dir = root_dir + '\\criteo_data_set\\'
@@ -294,7 +295,7 @@ def main(_):
     _print_init_info(train_files, valid_files, tests_files)
 
     print('==================== 2.Clear Existed Model and Initialized Distributed Environment...')
-    if FLAGS.clear_mode:        # 删除已存在的模型文件
+    if FLAGS.clr_mode:        # 删除已存在的模型文件
         try:
             shutil.rmtree(FLAGS.model_dir)      # 递归删除目录下的目录及文件
         except Exception as e:
@@ -303,26 +304,27 @@ def main(_):
             print("Existed model cleared at %s folder" % FLAGS.model_dir)
     distributed_env_set()       # 分布式环境设置
 
-    print('==================== 3.Build DCN model...')
-    model_params = {
-        "field_size": FLAGS.field_size,
-        "feature_size": FLAGS.feature_size,
-        "embedding_size": FLAGS.embedding_size,
-        "learning_rate": FLAGS.learning_rate,
-        "l2_reg": FLAGS.l2_reg,
-        "dropout": FLAGS.dropout,
-        "deep_layers": FLAGS.deep_layers,
-        "cross_layers": FLAGS.cross_layers,
-        "batch_norm_decay": FLAGS.batch_norm_decay
-    }
+    print('==================== 3.Build W&D model...')
+    hidden_units = map(int, FLAGS.deep_layers.split(","))
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_threads})
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-    fm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
-                                params=model_params, config=config)
 
-    print('==================== 4.Apply DCN model...')
+    if FLAGS.model_type == "wide":
+        w_d = tf.estimator.LinearClassifier(model_dir=FLAGS.model_dir, feature_columns=0,
+                                            config=config)
+    elif FLAGS.model_type == "deep":
+        w_d = tf.estimator.DNNClassifier(model_dir=FLAGS.model_dir, feature_columns=0,
+                                         hidden_units=hidden_units, config=config)
+    else:
+        w_d = tf.estimator.DNNLinearCombinedClassifier(model_dir=FLAGS.model_dir,
+                                                       linear_feature_columns=0,
+                                                       dnn_feature_columns=0,
+                                                       dnn_hidden_units=hidden_units,
+                                                       config=config)
+
+    print('==================== 4.Apply W&D model...')
     train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
@@ -331,11 +333,11 @@ def main(_):
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=200, throttle_secs=300)
-        tf.estimator.train_and_evaluate(fm, train_spec, eval_spec)
+        tf.estimator.train_and_evaluate(w_d, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
-        fm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        w_d.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == 'infer':
-        preds = fm.predict(
+        preds = w_d.predict(
             input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
         with open(FLAGS.data_dir+"/tests_pred.txt", "w") as fo:
@@ -346,7 +348,7 @@ def main(_):
             'feat_idx': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_idx'),
             'feat_val': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_val')}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        fm.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
+        w_d.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
