@@ -62,32 +62,29 @@ CSV_COLUMN_DEFAULTS = CSV_COLUMN_DEFAULTS + C_COLUMN_DEFAULTS + D_COLUMN_DEFAULT
 print(CSV_COLUMN_DEFAULTS)
 
 
-# 0 1:0.1 2:0.003322 3:0.44 4:0.02 5:0.001594 6:0.016 7:0.02
-# 8:0.04 9:0.008 10:0.166667 11:0.1 12:0 13:0.08
-# 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1 160:1 162:1 176:1 209:1 227:1
-# 264:1 273:1 312:1 335:1 387:1 395:1 404:1 407:1 427:1 434:1 443:1 466:1 479:1
+# There are 13 numeric features and 26 categorical features
+# 0	1	1	5	0	1382	4	15	2	181	1	2	null	2
+# 68fd1e64	80e26c9b	fb936136	7b4723c4	25c83c98	7e0ccccf	de7995b8
+# 1f89b562	a73ee510	a8cd5504	b2cb9c98	37c9c164	2824a5f6	1adce6ef
+# 8ba8b39a	891b62e7	e5ba7672	f54016b9	21ddcdc9	b1252a9d	07b5194c
+# null      3a171ecb	c5c50484	e8b83407	9727dd16
 def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
-    def dataset_etl(line):
-        feat_raw = tf.string_split([line], ' ')
-        labels = tf.string_to_number(feat_raw.values[0], out_type=tf.float32)
-        splits = tf.string_split(feat_raw.values[1:], ':')
-        idx_val = tf.reshape(splits.values, splits.dense_shape)
-        feat_idx, feat_val = tf.split(idx_val, num_or_size_splits=2, axis=1)    # 切割张量
-        feat_idx = tf.string_to_number(feat_idx, out_type=tf.int32)             # [field_size, 1]
-        feat_val = tf.string_to_number(feat_val, out_type=tf.float32)           # [field_size, 1]
-        return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
+    def datatxt_etl(line):
+        columns = tf.decode_csv(line, record_defaults=CSV_COLUMN_DEFAULTS)
+        features = dict(zip(CSV_COLUMNS, columns))
+        labels = features.pop(LABEL_COLUMN)
+        return features, labels
 
     # extract lines from input files[one filename or filename list] using the Dataset API,
     # multi-thread pre-process then prefetch some certain amount of data[6400]
-    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(6400)
+    dataset = tf.data.TextLineDataset(filenames).map(datatxt_etl, num_parallel_calls=4).prefetch(6400)
 
     # randomize the input data with a window of 256 elements (read into memory)
     if perform_shuffle:
         dataset = dataset.shuffle(buffer_size=256)
 
-    # epochs from blending together
     dataset = dataset.repeat(num_epochs)
     dataset = dataset.batch(batch_size)
     iterator = dataset.make_one_shot_iterator()
