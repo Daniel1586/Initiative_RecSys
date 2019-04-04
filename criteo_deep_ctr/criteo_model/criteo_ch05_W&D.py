@@ -34,32 +34,24 @@ flags.DEFINE_string("data_dir", "", "Data dir")
 flags.DEFINE_string("model_dir", "", "Model check point dir")
 flags.DEFINE_string("mark_dir", "", "Mark different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
-flags.DEFINE_integer("feature_size", 1842, "Number of features")
-flags.DEFINE_integer("field_size", 39, "Number of fields")
 flags.DEFINE_integer("embedding_size", 10, "Embedding size")
 flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 5000, "Save summary every steps")
-flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
-flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
-flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
-flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 flags.DEFINE_string("deep_layers", "256,128,64", "deep layers")
-flags.DEFINE_integer("cross_layers", 3, "cross layers, polynomial degree")
-flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
 FLAGS = flags.FLAGS
 
 # There are 13 integer features and 26 categorical features
-C_COLUMNS = ['I' + str(i) for i in range(1, 14)]
-D_COLUMNS = ['C' + str(i) for i in range(14, 40)]
-LABEL_COLUMN = "is_click"
-CSV_COLUMNS = [LABEL_COLUMN] + C_COLUMNS + D_COLUMNS
+numeric_cols = ['I' + str(i) for i in range(1, 14)]
+categoricals = ['C' + str(i) for i in range(14, 40)]
+label_column = "clicked"
+csv_columns = [label_column] + numeric_cols + categoricals
 # Columns Defaults
-CSV_COLUMN_DEFAULTS = [[0.0]]
-C_COLUMN_DEFAULTS = [[0.0] for i in range(13)]
-D_COLUMN_DEFAULTS = [[0] for i in range(26)]
-CSV_COLUMN_DEFAULTS = CSV_COLUMN_DEFAULTS + C_COLUMN_DEFAULTS + D_COLUMN_DEFAULTS
-print(CSV_COLUMN_DEFAULTS)
+csv_column_defaults = [[0.0]]
+numeric_cols_default = [[0.0] for i in range(13)]
+categoricals_default = [[0] for i in range(26)]
+csv_column_defaults = csv_column_defaults + numeric_cols_default + categoricals_default
+print(csv_column_defaults)
 
 
 # There are 13 numeric features and 26 categorical features
@@ -71,15 +63,15 @@ print(CSV_COLUMN_DEFAULTS)
 def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
-    def datatxt_etl(line):
-        columns = tf.decode_csv(line, record_defaults=CSV_COLUMN_DEFAULTS)
-        features = dict(zip(CSV_COLUMNS, columns))
-        labels = features.pop(LABEL_COLUMN)
+    def datacsv_etl(line):
+        columns = tf.decode_csv(line, record_defaults=csv_column_defaults)
+        features = dict(zip(csv_columns, columns))
+        labels = features.pop(label_column)
         return features, labels
 
     # extract lines from input files[one filename or filename list] using the Dataset API,
     # multi-thread pre-process then prefetch some certain amount of data[6400]
-    dataset = tf.data.TextLineDataset(filenames).map(datatxt_etl, num_parallel_calls=4).prefetch(6400)
+    dataset = tf.data.TextLineDataset(filenames).map(datacsv_etl, num_parallel_calls=4).prefetch(6400)
 
     # randomize the input data with a window of 256 elements (read into memory)
     if perform_shuffle:
@@ -94,20 +86,19 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
 
 
 def build_feature():
-    # numeric_feature
-    # 1 { continuous base columns }
-    deep_cbc = [tf.feature_column.numeric_column(colname) for colname in C_COLUMNS]
+    # 1 numeric_feature columns
+    deep_nfc = [tf.feature_column.numeric_column(col) for col in numeric_cols]
 
-    # 2 { categorical base columns }
-    deep_dbc = [tf.feature_column.categorical_column_with_identity(key=colname, num_buckets=10000, default_value=0) for
-                colname in D_COLUMNS]
+    # 2 categorical_feature columns
+    deep_cfc = [tf.feature_column.categorical_column_with_identity(key=col, num_buckets=10000, default_value=0) for
+                col in categoricals]
 
-    # 3 { embedding columns }
-    deep_emb = [tf.feature_column.embedding_column(c, dimension=FLAGS.embedding_size) for c in deep_dbc]
+    # 3 embedding columns
+    deep_emb = [tf.feature_column.embedding_column(c, dimension=FLAGS.embedding_size) for c in deep_cfc]
 
-    # 3 { wide columns and deep columns }
-    wide_columns = deep_cbc + deep_dbc
-    deep_columns = deep_cbc + deep_emb
+    # 4 wide columns and deep columns
+    wide_columns = deep_nfc + deep_cfc
+    deep_columns = deep_nfc + deep_emb
 
     return wide_columns, deep_columns
 
@@ -164,20 +155,14 @@ def distributed_env_set():
 # print initial information of paras,打印初始化参数信息
 def _print_init_info(train_files, valid_files, tests_files):
     print('task_mode --------- ', FLAGS.task_mode)
+    print('model_type -------- ', FLAGS.model_type)
     print('data_dir ---------- ', FLAGS.data_dir)
     print('model_dir --------- ', FLAGS.model_dir)
     print('mark_dir ---------- ', FLAGS.mark_dir)
-    print('feature_size ------ ', FLAGS.feature_size)
-    print('field_size -------- ', FLAGS.field_size)
     print('embedding_size ---- ', FLAGS.embedding_size)
     print('num_epochs -------- ', FLAGS.num_epochs)
     print('batch_size -------- ', FLAGS.batch_size)
-    print('loss -------------- ', FLAGS.loss)
-    print('optimizer --------- ', FLAGS.optimizer)
-    print('learning_rate ----- ', FLAGS.learning_rate)
-    print('l2_reg ------------ ', FLAGS.l2_reg)
     print('deep_layers ------- ', FLAGS.deep_layers)
-    print('dropout ----------- ', FLAGS.dropout)
     print("train_files: ", train_files)
     print("valid_files: ", valid_files)
     print("tests_files: ", tests_files)
@@ -192,10 +177,10 @@ def main(_):
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
         FLAGS.data_dir = root_dir + '\\criteo_data_set\\'
 
-    train_files = glob.glob("%s/train*set" % FLAGS.data_dir)    # 获取指定目录下train文件
+    train_files = glob.glob("%s/train*csv" % FLAGS.data_dir)    # 获取指定目录下train文件
     random.shuffle(train_files)
-    valid_files = glob.glob("%s/valid*set" % FLAGS.data_dir)    # 获取指定目录下valid文件
-    tests_files = glob.glob("%s/tests*set" % FLAGS.data_dir)    # 获取指定目录下tests文件
+    valid_files = glob.glob("%s/valid*csv" % FLAGS.data_dir)    # 获取指定目录下valid文件
+    tests_files = glob.glob("%s/tests*csv" % FLAGS.data_dir)    # 获取指定目录下tests文件
     _print_init_info(train_files, valid_files, tests_files)
 
     print('==================== 2.Clear Existed Model and Initialized Distributed Environment...')
@@ -209,22 +194,23 @@ def main(_):
     distributed_env_set()       # 分布式环境设置
 
     print('==================== 3.Build W&D model...')
+    wide_columns, deep_columns = build_feature()
+
     hidden_units = map(int, FLAGS.deep_layers.split(","))
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_threads})
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-
     if FLAGS.model_type == "wide":
-        w_d = tf.estimator.LinearClassifier(model_dir=FLAGS.model_dir, feature_columns=0,
+        w_d = tf.estimator.LinearClassifier(model_dir=FLAGS.model_dir, feature_columns=wide_columns,
                                             config=config)
     elif FLAGS.model_type == "deep":
-        w_d = tf.estimator.DNNClassifier(model_dir=FLAGS.model_dir, feature_columns=0,
+        w_d = tf.estimator.DNNClassifier(model_dir=FLAGS.model_dir, feature_columns=deep_columns,
                                          hidden_units=hidden_units, config=config)
     else:
         w_d = tf.estimator.DNNLinearCombinedClassifier(model_dir=FLAGS.model_dir,
-                                                       linear_feature_columns=0,
-                                                       dnn_feature_columns=0,
+                                                       linear_feature_columns=wide_columns,
+                                                       dnn_feature_columns=deep_columns,
                                                        dnn_hidden_units=hidden_units,
                                                        config=config)
 
@@ -246,11 +232,15 @@ def main(_):
             predict_keys="prob")
         with open(FLAGS.data_dir+"/tests_pred.txt", "w") as fo:
             for prob in preds:
-                fo.write("%f\n" % (prob['prob']))
+                fo.write("%f\n" % (prob['prob'][1]))
     elif FLAGS.task_mode == 'export':
-        feature_spec = {
-            'feat_idx': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_idx'),
-            'feat_val': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_val')}
+        if FLAGS.model_type == "wide":
+            feature_columns = wide_columns
+        elif FLAGS.model_type == "deep":
+            feature_columns = deep_columns
+        elif FLAGS.model_type == "wide_deep":
+            feature_columns = wide_columns + deep_columns
+        feature_spec = tf.feature_column.make_parse_example_spec(feature_columns)
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
         w_d.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
