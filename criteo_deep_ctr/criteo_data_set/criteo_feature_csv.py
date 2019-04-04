@@ -38,9 +38,9 @@ def preprocess(datadir, outdir):
 
                     label = features[0]
                     if random.randint(0, 9999) % 10 != 0:
-                        out_train.write("{0},{1}\n".format(label, ','.join(features)))
+                        out_train.write("{0},{1}\n".format(label, ','.join(features[1:])))
                     else:
-                        out_valid.write("{0},{1}\n".format(label, ','.join(features)))
+                        out_valid.write("{0},{1}\n".format(label, ','.join(features[1:])))
 
     with open(outdir + 'tests.csv', 'w') as out_test:
         with open(datadir + 'test.txt', 'r') as f:
