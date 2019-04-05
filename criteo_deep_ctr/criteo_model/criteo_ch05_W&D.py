@@ -43,15 +43,16 @@ FLAGS = flags.FLAGS
 
 # There are 13 integer features and 26 categorical features
 numeric_cols = ['I' + str(i) for i in range(1, 14)]
-categoricals = ['C' + str(i) for i in range(14, 40)]
+categoricals = ['C' + str(i) for i in range(1, 27)]
 label_column = "clicked"
 csv_columns = [label_column] + numeric_cols + categoricals
 # Columns Defaults
-csv_column_defaults = [[0.0]]
-numeric_cols_default = [[0.0] for i in range(13)]
-categoricals_default = [[0] for i in range(26)]
-csv_column_defaults = csv_column_defaults + numeric_cols_default + categoricals_default
+csv_label_defaults = [[0]]
+numeric_cols_default = [[0] for i in range(13)]
+categoricals_default = [[''] for i in range(26)]
+csv_column_defaults = csv_label_defaults + numeric_cols_default + categoricals_default
 print(csv_column_defaults)
+print('There are some problems to be modified')
 
 
 # There are 13 numeric features and 26 categorical features
@@ -90,14 +91,14 @@ def build_feature():
     deep_nfc = [tf.feature_column.numeric_column(col) for col in numeric_cols]
 
     # 2 categorical_feature columns
-    deep_cfc = [tf.feature_column.categorical_column_with_identity(key=col, num_buckets=10000, default_value=0) for
+    deep_cfc = [tf.feature_column.categorical_column_with_identity(key=col, num_buckets=10000) for
                 col in categoricals]
 
     # 3 embedding columns
     deep_emb = [tf.feature_column.embedding_column(c, dimension=FLAGS.embedding_size) for c in deep_cfc]
 
     # 4 wide columns and deep columns
-    wide_columns = deep_nfc + deep_cfc
+    wide_columns = deep_cfc
     deep_columns = deep_nfc + deep_emb
 
     return wide_columns, deep_columns
