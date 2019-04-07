@@ -8,6 +8,7 @@ Implementation of FM model with the following features：
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
 #4 Support export_model for TensorFlow Serving.
+########## TF Version: 1.8.0 ##########
 """
 
 import os
@@ -21,39 +22,38 @@ from datetime import date, timedelta
 # =================== CMD Arguments for PNN model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
-flags.DEFINE_boolean("clear_mode", True, "clear existed model or not")
+flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
+flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
+flags.DEFINE_string("model_type", 'Inner', "model type {FNN, Inner, Outer}")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
-flags.DEFINE_string("job_name", None, "job name: ps or worker")
+flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_index", None, "Index of task within the job")
 flags.DEFINE_integer("num_threads", 4, "Number of threads")
-flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
-flags.DEFINE_string("model_dir", "", "model check point dir")
-flags.DEFINE_string("data_dir", "", "data dir")
-flags.DEFINE_string("flag_dir", "", "flag name for different model")
+flags.DEFINE_string("data_dir", "", "Data dir")
+flags.DEFINE_string("model_dir", "", "Model check point dir")
+flags.DEFINE_string("mark_dir", "", "Mark different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
-flags.DEFINE_integer("feature_size", 490, "Number of features[numeric + one-hot feature]")
+flags.DEFINE_integer("feature_size", 1842, "Number of features")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("embedding_size", 8, "Embedding size[length of hidden vector of xi/xj]")
-flags.DEFINE_integer("embedding_size", 8, "Embedding size[length of hidden vector of xi/xj]")
-flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
+flags.DEFINE_integer("embedding_size", 10, "Embedding size")
+flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
-flags.DEFINE_integer("log_steps", 5000, "save summary every steps")
+flags.DEFINE_integer("log_steps", 5000, "Save summary every steps")
 flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
-flags.DEFINE_string("optimizer", 'Adam', "{Adam, Adagrad, Momentum, Ftrl, GD}")
-flags.DEFINE_string("model_type", 'Inner', "model type {FNN, Inner, Outer}")
+flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
+flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
+flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 flags.DEFINE_string("deep_layers", "256,128,64", "deep layers")
 flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
-flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
-flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 FLAGS = flags.FLAGS
 
 
-# 0 1:0.1 2:0.003322 3:0.44 4:0.02 5:0.001594 6:0.016 7:0.02 8:0.04 9:0.008
-# 10:0.166667 11:0.1 12:0 13:0.08 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1
-# 160:1 162:1 176:1 209:1 227:1 264:1 273:1 312:1 335:1 387:1 395:1 404:1
-# 407:1 427:1 434:1 443:1 466:1 479:1
-def input_fn_pnn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
+# 0 1:0.1 2:0.003322 3:0.44 4:0.02 5:0.001594 6:0.016 7:0.02
+# 8:0.04 9:0.008 10:0.166667 11:0.1 12:0 13:0.08
+# 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1 160:1 162:1 176:1 209:1 227:1
+# 264:1 273:1 312:1 335:1 387:1 395:1 404:1 407:1 427:1 434:1 443:1 466:1 479:1
+def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     print('Parsing ----------- ', filenames)
 
     def dataset_etl(line):
@@ -61,14 +61,14 @@ def input_fn_pnn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
         labels = tf.string_to_number(feat_raw.values[0], out_type=tf.float32)
         splits = tf.string_split(feat_raw.values[1:], ':')
         idx_val = tf.reshape(splits.values, splits.dense_shape)
-        feat_idx, feat_val = tf.split(idx_val, num_or_size_splits=2, axis=1)
-        feat_idx = tf.string_to_number(feat_idx, out_type=tf.int32)         # [field_size * 1]
-        feat_val = tf.string_to_number(feat_val, out_type=tf.float32)       # [field_size * 1]
+        feat_idx, feat_val = tf.split(idx_val, num_or_size_splits=2, axis=1)    # 切割张量
+        feat_idx = tf.string_to_number(feat_idx, out_type=tf.int32)             # [field_size, 1]
+        feat_val = tf.string_to_number(feat_val, out_type=tf.float32)           # [field_size, 1]
         return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
 
     # extract lines from input files[one filename or filename list] using the Dataset API,
-    # multi-thread pre-process then prefetch some certain amount of data[100000]
-    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=10).prefetch(100000)
+    # multi-thread pre-process then prefetch some certain amount of data[6400]
+    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(6400)
 
     # randomize the input data with a window of 256 elements (read into memory)
     if perform_shuffle:
@@ -78,7 +78,7 @@ def input_fn_pnn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     dataset = dataset.repeat(num_epochs)
     dataset = dataset.batch(batch_size)
     iterator = dataset.make_one_shot_iterator()
-    batch_features, batch_labels = iterator.get_next()      # [batch_size * field_size * 1]
+    batch_features, batch_labels = iterator.get_next()      # [batch_size, field_size, 1]
 
     return batch_features, batch_labels
 
@@ -180,12 +180,12 @@ def distributed_env_set():
     if FLAGS.run_mode == 1:     # 单机分布式
         ps_hosts = FLAGS.ps_hosts.split(',')
         chief_hosts = FLAGS.worker_hosts.split(',')
-        task_index = FLAGS.task_index
         job_name = FLAGS.job_name
-        print('ps_host ------', ps_hosts)
-        print('chief_hosts --', chief_hosts)
-        print('job_name -----', job_name)
-        print('task_index ---', str(task_index))
+        task_index = FLAGS.task_index
+        print('ps_host --------', ps_hosts)
+        print('chief_hosts ----', chief_hosts)
+        print('job_name -------', job_name)
+        print('task_index -----', str(task_index))
         # 无worker参数
         tf_config = {
             'cluster': {'chief': chief_hosts, 'ps': ps_hosts},
@@ -225,12 +225,13 @@ def distributed_env_set():
 
 
 # print initial information of paras,打印初始化参数信息
-def _init_info(train_files, valid_files, tests_files):
+def _print_init_info(train_files, valid_files, tests_files):
     print('task_mode --------- ', FLAGS.task_mode)
-    print('model_dir --------- ', FLAGS.model_dir)
     print('data_dir ---------- ', FLAGS.data_dir)
-    print('flag_dir ---------- ', FLAGS.flag_dir)
+    print('model_dir --------- ', FLAGS.model_dir)
+    print('mark_dir ---------- ', FLAGS.mark_dir)
     print('feature_size ------ ', FLAGS.feature_size)
+    print('field_size -------- ', FLAGS.field_size)
     print('embedding_size ---- ', FLAGS.embedding_size)
     print('num_epochs -------- ', FLAGS.num_epochs)
     print('batch_size -------- ', FLAGS.batch_size)
@@ -238,36 +239,37 @@ def _init_info(train_files, valid_files, tests_files):
     print('optimizer --------- ', FLAGS.optimizer)
     print('learning_rate ----- ', FLAGS.learning_rate)
     print('l2_reg ------------ ', FLAGS.l2_reg)
+    print('deep_layers ------- ', FLAGS.deep_layers)
+    print('dropout ----------- ', FLAGS.dropout)
     print("train_files: ", train_files)
     print("valid_files: ", valid_files)
     print("tests_files: ", tests_files)
 
 
 def main(_):
-    print('==================== 1.Check and Print Arguments...')
-    if FLAGS.flag_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型]
-        FLAGS.flag_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
-    FLAGS.model_dir = FLAGS.model_dir + FLAGS.flag_dir
-
+    print('==================== 1.Check Arguments and Print Init Info...')
+    if FLAGS.mark_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型,程序执行日期前一天:20190327]
+        FLAGS.mark_dir = 'ch03_DFM_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+    FLAGS.model_dir = FLAGS.model_dir + FLAGS.mark_dir
     if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
-        FLAGS.data_dir = root_dir + '\\criteo_data_trans\\'
+        FLAGS.data_dir = root_dir + '\\criteo_data_set\\'
 
-    train_files = glob.glob("%s/train*set" % FLAGS.data_dir)
+    train_files = glob.glob("%s/train*set" % FLAGS.data_dir)    # 获取指定目录下train文件
     random.shuffle(train_files)
-    valid_files = glob.glob("%s/valid*set" % FLAGS.data_dir)
-    tests_files = glob.glob("%s/tests*set" % FLAGS.data_dir)
-    _init_info(train_files, valid_files, tests_files)
+    valid_files = glob.glob("%s/valid*set" % FLAGS.data_dir)    # 获取指定目录下valid文件
+    tests_files = glob.glob("%s/tests*set" % FLAGS.data_dir)    # 获取指定目录下tests文件
+    _print_init_info(train_files, valid_files, tests_files)
 
-    print('==================== 2.Initialized Environment...')
-    if FLAGS.clear_mode:   # 删除已存在的模型文件
+    print('==================== 2.Clear Existed Model and Initialized Distributed Environment...')
+    if FLAGS.clr_mode:          # 删除已存在的模型文件
         try:
-            shutil.rmtree(FLAGS.model_dir)
+            shutil.rmtree(FLAGS.model_dir)      # 递归删除目录下的目录及文件
         except Exception as e:
-            print(e, "at clear_existed_model")
+            print(e, "At clear_existed_model")
         else:
-            print("existed model cleared at %s folder" % FLAGS.model_dir)
-    distributed_env_set()           # 分布式环境设置
+            print("Existed model cleared at %s folder" % FLAGS.model_dir)
+    distributed_env_set()       # 分布式环境设置
 
     print('==================== 3.Build FM model...')
     model_params = {
@@ -280,36 +282,37 @@ def main(_):
         "deep_layers": FLAGS.deep_layers,
     }
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_threads})
-    config = tf.estimator.RunConfig().replace(
-        session_config=session_config, log_step_count_steps=FLAGS.log_steps, save_summary_steps=FLAGS.log_steps)
-    fm = tf.estimator.Estimator(model_fn=model_fn_fm, model_dir=FLAGS.model_dir,
-                                params=model_params, config=config)
+    config = tf.estimator.RunConfig().replace(session_config=session_config,
+                                              save_summary_steps=FLAGS.log_steps,
+                                              log_step_count_steps=FLAGS.log_steps)
+    dfm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
+                                 params=model_params, config=config)
 
-    print('==================== 4.Apply FM model...')
-    train_step = 28120*10     # data_num * num_epochs / batch_size
+    print('==================== 4.Apply DeepFM model...')
+    train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
-            input_fn=lambda: input_fn_fm(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
+            input_fn=lambda: input_fn(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
-            input_fn=lambda: input_fn_fm(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
-            steps=None, start_delay_secs=1000, throttle_secs=1200)
-        tf.estimator.train_and_evaluate(fm, train_spec, eval_spec)
+            input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
+            steps=None, start_delay_secs=200, throttle_secs=300)
+        tf.estimator.train_and_evaluate(dfm, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
-        fm.evaluate(input_fn=lambda: input_fn_fm(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        dfm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == 'infer':
-        preds = fm.predict(
-            input_fn=lambda: input_fn_fm(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
+        preds = dfm.predict(
+            input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
-        with open(FLAGS.data_dir+"/pred.txt", "w") as fo:
+        with open(FLAGS.data_dir+"/tests_pred.txt", "w") as fo:
             for prob in preds:
                 fo.write("%f\n" % (prob['prob']))
     elif FLAGS.task_mode == 'export':
         feature_spec = {
-            'feat_ids': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_ids'),
-            'feat_vals': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_vals')}
+            'feat_idx': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_idx'),
+            'feat_val': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_val')}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        fm.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
+        dfm.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
