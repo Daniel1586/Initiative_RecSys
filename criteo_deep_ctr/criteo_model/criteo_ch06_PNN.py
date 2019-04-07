@@ -83,7 +83,7 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
     return batch_features, batch_labels
 
 
-def model_fn_pnn(features, labels, mode, params):
+def model_fn(features, labels, mode, params):
 
     # ----- hyper-parameters ----- #
     l2_reg = params["l2_reg"]
@@ -227,6 +227,7 @@ def distributed_env_set():
 # print initial information of paras,打印初始化参数信息
 def _print_init_info(train_files, valid_files, tests_files):
     print('task_mode --------- ', FLAGS.task_mode)
+    print('model_type -------- ', FLAGS.model_type)
     print('data_dir ---------- ', FLAGS.data_dir)
     print('model_dir --------- ', FLAGS.model_dir)
     print('mark_dir ---------- ', FLAGS.mark_dir)
@@ -249,7 +250,7 @@ def _print_init_info(train_files, valid_files, tests_files):
 def main(_):
     print('==================== 1.Check Arguments and Print Init Info...')
     if FLAGS.mark_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.mark_dir = 'ch03_DFM_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.mark_dir = 'ch03_PNN_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.mark_dir
     if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
@@ -271,7 +272,7 @@ def main(_):
             print("Existed model cleared at %s folder" % FLAGS.model_dir)
     distributed_env_set()       # 分布式环境设置
 
-    print('==================== 3.Build FM model...')
+    print('==================== 3.Build PNN model...')
     model_params = {
         "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
@@ -280,15 +281,16 @@ def main(_):
         "l2_reg": FLAGS.l2_reg,
         "dropout": FLAGS.dropout,
         "deep_layers": FLAGS.deep_layers,
+        "model_type": FLAGS.model_type,
     }
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_threads})
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-    dfm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
+    pnn = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
                                  params=model_params, config=config)
 
-    print('==================== 4.Apply DeepFM model...')
+    print('==================== 4.Apply PNN model...')
     train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
@@ -297,11 +299,11 @@ def main(_):
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=200, throttle_secs=300)
-        tf.estimator.train_and_evaluate(dfm, train_spec, eval_spec)
+        tf.estimator.train_and_evaluate(pnn, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
-        dfm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        pnn.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == 'infer':
-        preds = dfm.predict(
+        preds = pnn.predict(
             input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
         with open(FLAGS.data_dir+"/tests_pred.txt", "w") as fo:
@@ -312,7 +314,7 @@ def main(_):
             'feat_idx': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_idx'),
             'feat_val': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_val')}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        dfm.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
+        pnn.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
