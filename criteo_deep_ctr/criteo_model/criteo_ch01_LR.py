@@ -35,7 +35,7 @@ flags.DEFINE_string("mark_dir", "", "Mark different model")
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
 flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
+flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 5000, "Save summary every steps")
 flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
@@ -89,13 +89,13 @@ def model_fn(features, labels, mode, params):
 
     # ----- initial weights ----- #
     # [numeric_feature, one-hot categorical_feature]
-    fm_b = tf.get_variable(name='fm_b', shape=[1], initializer=tf.constant_initializer(0.0))
-    fm_w = tf.get_variable(name='fm_w', shape=[feature_size], initializer=tf.glorot_normal_initializer())
+    fm_b = tf.get_variable(name="fm_b", shape=[1], initializer=tf.constant_initializer(0.0))
+    fm_w = tf.get_variable(name="fm_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
 
     # ----- reshape feature ----- #
-    feat_idx = features['feat_idx']         # 非零特征位置[batch_size, field_size, 1]
+    feat_idx = features["feat_idx"]         # 非零特征位置[batch_size, field_size, 1]
     feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # [Batch, Field]
-    feat_val = features['feat_val']         # 非零特征的值[batch_size, field_size, 1]
+    feat_val = features["feat_val"]         # 非零特征的值[batch_size, field_size, 1]
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
     # ----- define f(x) ----- #
@@ -131,13 +131,13 @@ def model_fn(features, labels, mode, params):
                                           eval_metric_ops=eval_metric_ops)
 
     # Provide an estimator spec for 'ModeKeys.TRAIN'
-    if FLAGS.optimizer == 'Adam':
+    if FLAGS.optimizer == "Adam":
         optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-8)
-    elif FLAGS.optimizer == 'Adagrad':
+    elif FLAGS.optimizer == "Adagrad":
         optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate, initial_accumulator_value=1e-8)
-    elif FLAGS.optimizer == 'Momentum':
+    elif FLAGS.optimizer == "Momentum":
         optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.95)
-    elif FLAGS.optimizer == 'Ftrl':
+    elif FLAGS.optimizer == "Ftrl":
         optimizer = tf.train.FtrlOptimizer(learning_rate)
     else:
         optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
@@ -275,8 +275,8 @@ def main(_):
                 fo.write("%f\n" % (prob['prob']))
     elif FLAGS.task_mode == 'export':
         feature_spec = {
-            'feat_idx': tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name='feat_idx'),
-            'feat_val': tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name='feat_val')}
+            "feat_idx": tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name="feat_idx"),
+            "feat_val": tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name="feat_val")}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
         lr.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
