@@ -3,6 +3,7 @@
 
 """
 <<PNN: Product-based Neural Networks for User Response Prediction.>>
+<<FNN: Deep Learning over Multi-Field Categorical Data: A Case Study on User Response Prediction.>>
 Implementation of FM model with the following features：
 #1 Input pipeline using Dataset API, Support parallel and prefetch.
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
@@ -19,12 +20,12 @@ import shutil
 import tensorflow as tf
 from datetime import date, timedelta
 
-# =================== CMD Arguments for PNN model =================== #
+# =================== CMD Arguments for PNN/FNN model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
 flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
 flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
-flags.DEFINE_string("model_type", 'Inner', "model type {FNN, Inner, Outer}")
+flags.DEFINE_string("model_type", "Inner", "model type {FNN, Inner, Outer}")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("job_name", None, "Job name: ps or worker")
@@ -46,6 +47,8 @@ flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
 flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 flags.DEFINE_string("deep_layers", "256,128,64", "deep layers")
 flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
+flags.DEFINE_boolean("batch_norm", False, "perform batch normalization (True or False)")
+flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(decay=0.9)")
 FLAGS = flags.FLAGS
 
 
@@ -91,50 +94,89 @@ def model_fn(features, labels, mode, params):
     feature_size = params["feature_size"]
     embedding_size = params["embedding_size"]
     learning_rate = params["learning_rate"]
-    # l1神经元数量等于D1长度
-    print('to be modified')
-    layers = list(map(int, params["deep_layers"].split(',')))
+    layers = list(map(int, params["deep_layers"].split(',')))   # l1神经元数量等于D1长度
     dropout = list(map(float, params["dropout"].split(',')))
-    num_pairs = field_size * (field_size - 1) / 2
+    num_pairs = int(field_size * (field_size - 1) / 2)
 
     # ----- initial weights ----- #
     # [numeric_feature, one-hot categorical_feature]统一做embedding
-    feat_bias = tf.get_variable(name='feat_bias', shape=[1], initializer=tf.constant_initializer(0.0))
+    glob_bias = tf.get_variable(name='feat_bias', shape=[1], initializer=tf.constant_initializer(0.0))
+    feat_weig = tf.get_variable(name='feat_weig', shape=[feature_size], initializer=tf.constant_initializer(0.0))
     feat_embd = tf.get_variable(name='feat_embd', shape=[feature_size, embedding_size],
                                 initializer=tf.glorot_normal_initializer())
-    product_z = tf.get_variable(name='product_z', )
-    weights['product-linear'] = tf.Variable(tf.random_normal(
-        [self.deep_init_size, self.field_size, self.embedding_size], 0.0, 0.01))
 
     # ----- reshape feature ----- #
-    feat_idx = features['feat_idx']         # 非零特征位置[batch_size * field_size * 1]
-    feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # Batch * F
-    feat_val = features['feat_val']         # 非零特征的值[batch_size * field_size * 1]
-    feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # Batch * F
+    feat_idx = features['feat_idx']         # 非零特征位置[batch_size, field_size, 1]
+    feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # [Batch, Field]
+    feat_val = features['feat_val']         # 非零特征的值[batch_size, field_size, 1]
+    feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
     # ----- define f(x) ----- #
-    with tf.variable_scope("embedding-layer"):
-        embeddings = tf.nn.embedding_lookup(feat_embd, feat_idx)        # Batch * F * K
-        feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # Batch * F * 1
-        embeddings = tf.multiply(embeddings, feat_vals)                 # Batch * F * K
+    with tf.variable_scope("Linear-part"):
+        feat_wgt = tf.nn.embedding_lookup(feat_weig, feat_idx)          # [Batch, Field]
+        y_linear = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)    # [Batch]
 
-    with tf.variable_scope("product-layer"):
-        if FLAGS.model_type == "Inner":
-            rows = []
-            cols = []
-            for ii in range(field_size-1):
-                for jj in range(ii+1, field_size):
-                    rows.append(ii)
-                    cols.append(jj)
-            f_ii = tf.gather(embeddings, rows, axis=1)
-            f_jj = tf.gather(embeddings, cols, axis=1)
-            inner = tf.reshape(tf.reduce_mean(f_ii*f_jj, [-1]), [-1, num_pairs])
-            deep_input = tf.concat([tf.reshape(embeddings, shape=[-1, field_size*embedding_size]), inner], 1)
+    with tf.variable_scope("Embedding-layer"):
+        embeddings = tf.nn.embedding_lookup(feat_embd, feat_idx)        # [Batch, Field, K]
+        feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # [Batch, Field, 1]
+        embeddings = tf.multiply(embeddings, feat_vals)                 # [Batch, Field, K]
 
-    with tf.variable_scope("deep-part"):
-        pass
-        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)      # Batch * 1
-        y_hat = y_bias + y_w + y_v
+    with tf.variable_scope("Product-layer"):
+        if FLAGS.model_type == "FNN":
+            deep_inputs = tf.reshape(embeddings, shape=[-1, field_size*embedding_size])
+        elif FLAGS.model_type == "Inner":
+            row = []
+            col = []
+            for i in range(field_size - 1):
+                for j in range(i + 1, field_size):
+                    row.append(i)
+                    col.append(j)
+            p = tf.gather(embeddings, row, axis=1)      # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
+            q = tf.gather(embeddings, col, axis=1)      # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
+            inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])     # [Batch, num_pairs]
+            deep_inputs = tf.concat(
+                [tf.reshape(embeddings, shape=[-1, field_size*embedding_size]), inner], 1)  # [Batch, num_pairs+F*K]
+        elif FLAGS.model_type == "Outer":
+            row = []
+            col = []
+            for i in range(field_size - 1):
+                for j in range(i + 1, field_size):
+                    row.append(i)
+                    col.append(j)
+            p = tf.gather(embeddings, row, axis=1)
+            q = tf.gather(embeddings, col, axis=1)
+            # p = tf.reshape(p, [-1, num_pairs, embedding_size])
+            # q = tf.reshape(q, [-1, num_pairs, embedding_size])
+            # einsum('i,j->ij', p, q)  # output[i,j] = p[i]*q[j]				# Outer product
+            outer = tf.reshape(tf.einsum('api,apj->apij', p, q),
+                               [-1, num_pairs * embedding_size * embedding_size])  # None * (F*(F-1)/2*K*K)
+            deep_inputs = tf.concat([tf.reshape(embeddings, shape=[-1, field_size * embedding_size]), outer],
+                                    1)  # None * ( F*K+F*(F-1)/2*K*K )
+
+    with tf.variable_scope("Deep-layer"):
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            train_phase = True
+        else:
+            train_phase = False
+        for i in range(len(layers)):
+            deep_inputs = tf.contrib.layers.fully_connected(
+                inputs=deep_inputs, num_outputs=layers[i], scope='mlp_%d' % i,
+                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg))
+            if FLAGS.batch_norm:
+                # <<https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md>>
+                # Batch normalization after Relu
+                deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' % i)
+            if mode == tf.estimator.ModeKeys.TRAIN:
+                deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])
+
+        y_deep = tf.contrib.layers.fully_connected(
+            inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity,
+            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')
+        y_d = tf.reshape(y_deep, shape=[-1])
+
+    with tf.variable_scope("PNN-out"):
+        y_bias = glob_bias * tf.ones_like(y_d, dtype=tf.float32)
+        y_hat = y_bias + y_linear + y_d
         y_pred = tf.nn.sigmoid(y_hat)
 
     # ----- mode: predict/evaluate/train ----- #
@@ -145,12 +187,13 @@ def model_fn(features, labels, mode, params):
         tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:
             tf.estimator.export.PredictOutput(predictions)}
     if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions,
+                                          export_outputs=export_outputs)
 
     # Provide an estimator spec for 'ModeKeys.EVAL'
     if FLAGS.loss == "log_loss":
         loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) +\
-               l2_reg * tf.nn.l2_loss(fm_w) + l2_reg * tf.nn.l2_loss(fm_v)
+               l2_reg * tf.nn.l2_loss(feat_weig) + l2_reg * tf.nn.l2_loss(feat_embd)
     else:
         loss = tf.reduce_mean(tf.square(labels-y_hat))
     eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
@@ -159,13 +202,13 @@ def model_fn(features, labels, mode, params):
                                           eval_metric_ops=eval_metric_ops)
 
     # Provide an estimator spec for 'ModeKeys.TRAIN'
-    if FLAGS.optimizer == 'Adam':
+    if FLAGS.optimizer == "Adam":
         optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-8)
-    elif FLAGS.optimizer == 'Adagrad':
+    elif FLAGS.optimizer == "Adagrad":
         optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate, initial_accumulator_value=1e-8)
-    elif FLAGS.optimizer == 'Momentum':
+    elif FLAGS.optimizer == "Momentum":
         optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.95)
-    elif FLAGS.optimizer == 'Ftrl':
+    elif FLAGS.optimizer == "Ftrl":
         optimizer = tf.train.FtrlOptimizer(learning_rate)
     else:
         optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
@@ -173,6 +216,16 @@ def model_fn(features, labels, mode, params):
 
     if mode == tf.estimator.ModeKeys.TRAIN:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
+
+
+# Implementation of Batch normalization, train/infer
+def batch_norm_layer(x, train_phase, scope_bn):
+    bn_train = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True,
+                                            updates_collections=None, is_training=True,  reuse=None, scope=scope_bn)
+    bn_infer = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True,
+                                            updates_collections=None, is_training=False, reuse=True, scope=scope_bn)
+    z = tf.cond(tf.cast(train_phase, tf.bool), lambda: bn_train, lambda: bn_infer)
+    return z
 
 
 # Initialized Distributed Environment,初始化分布式环境
@@ -242,6 +295,8 @@ def _print_init_info(train_files, valid_files, tests_files):
     print('l2_reg ------------ ', FLAGS.l2_reg)
     print('deep_layers ------- ', FLAGS.deep_layers)
     print('dropout ----------- ', FLAGS.dropout)
+    print('batch_norm -------- ', FLAGS.batch_norm)
+    print('batch_norm_decay -- ', FLAGS.batch_norm_decay)
     print("train_files: ", train_files)
     print("valid_files: ", valid_files)
     print("tests_files: ", tests_files)
@@ -250,7 +305,7 @@ def _print_init_info(train_files, valid_files, tests_files):
 def main(_):
     print('==================== 1.Check Arguments and Print Init Info...')
     if FLAGS.mark_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.mark_dir = 'ch03_PNN_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.mark_dir = 'ch06_PNN_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.mark_dir
     if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
         root_dir = os.path.abspath(os.path.dirname(os.getcwd()))
