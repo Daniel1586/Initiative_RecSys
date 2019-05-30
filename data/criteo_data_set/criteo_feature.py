@@ -178,7 +178,7 @@ def preprocess(datain_dir, dataou_dir):
 if __name__ == "__main__":
     run_mode = 0        # 0: windows环境
     if run_mode == 0:
-        dir_data = os.path.abspath(os.path.dirname(os.getcwd()))
+        dir_data = os.path.dirname(os.getcwd())
         dir_datain = dir_data + '\\criteo_data_raw\\'
         dir_dataou = dir_data + '\\criteo_data_set\\'
     else:
