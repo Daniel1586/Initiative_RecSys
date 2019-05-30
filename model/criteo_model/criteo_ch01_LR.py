@@ -29,9 +29,11 @@ flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port
 flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_index", None, "Index of task within the job")
 flags.DEFINE_integer("num_threads", 4, "Number of threads")
-flags.DEFINE_string("data_dir", "", "Data dir")
-flags.DEFINE_string("model_dir", "", "Model check point dir")
-flags.DEFINE_string("mark_dir", "", "Mark different model")
+
+flags.DEFINE_string("input_dir", "", "Input data dir")
+flags.DEFINE_string("model_dir", "", "Model check point file dir")
+flags.DEFINE_string("file_name", "", "File for save model")
+
 flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
 flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
@@ -217,17 +219,17 @@ def _print_init_info(train_files, valid_files, tests_files):
 
 def main(_):
     print('==================== 1.Check Arguments and Print Init Info...')
-    if FLAGS.mark_dir == "":    # 存储算法模型文件目录[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.mark_dir = 'ch01_LR_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
-    FLAGS.model_dir = FLAGS.model_dir + FLAGS.mark_dir
-    if FLAGS.data_dir == "":    # windows环境测试[未指定data目录条件下]
+    if FLAGS.file_name == "":       # 存储算法模型文件名称[标记不同时刻训练模型,程序执行日期前一天:20190327]
+        FLAGS.file_name = 'ch01_LR_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+    FLAGS.model_dir = FLAGS.model_dir + FLAGS.file_name
+    if FLAGS.input_dir == "":       # windows环境测试[未指定data目录条件下]
         root_dir = os.path.dirname(os.path.dirname(os.getcwd()))
-        FLAGS.data_dir = root_dir + '\\data' + '\\criteo_data_set\\'
+        FLAGS.input_dir = root_dir + '\\data' + '\\criteo_data_set\\'
 
-    train_files = glob.glob("%s/train*set" % FLAGS.data_dir)    # 获取指定目录下train文件
+    train_files = glob.glob("%s/train*set" % FLAGS.input_dir)    # 获取指定目录下train文件
     random.shuffle(train_files)
-    valid_files = glob.glob("%s/valid*set" % FLAGS.data_dir)    # 获取指定目录下valid文件
-    tests_files = glob.glob("%s/tests*set" % FLAGS.data_dir)    # 获取指定目录下tests文件
+    valid_files = glob.glob("%s/valid*set" % FLAGS.input_dir)    # 获取指定目录下valid文件
+    tests_files = glob.glob("%s/tests*set" % FLAGS.input_dir)    # 获取指定目录下tests文件
     _print_init_info(train_files, valid_files, tests_files)
 
     print('==================== 2.Clear Existed Model and Initialized Distributed Environment...')
