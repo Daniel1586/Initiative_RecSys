@@ -22,28 +22,26 @@ from datetime import date, timedelta
 # =================== CMD Arguments for LR model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
-flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
-flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_index", None, "Index of task within the job")
-flags.DEFINE_integer("num_threads", 4, "Number of threads")
-
+flags.DEFINE_integer("num_thread", 4, "Number of threads")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("file_name", "", "File for save model")
-
-flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
+flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
+flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
+flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
 flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 flags.DEFINE_integer("log_steps", 5000, "Save summary every steps")
-flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
+flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
-flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
+flags.DEFINE_float("l2_reg_lambda", 0.0001, "L2 regularization")
 FLAGS = flags.FLAGS
 
 
@@ -200,39 +198,38 @@ def distributed_env_set():
 
 # print initial information of paras,打印初始化参数信息
 def _print_init_info(train_files, valid_files, tests_files):
-    print('task_mode --------- ', FLAGS.task_mode)
-    print('data_dir ---------- ', FLAGS.data_dir)
-    print('model_dir --------- ', FLAGS.model_dir)
-    print('mark_dir ---------- ', FLAGS.mark_dir)
-    print('feature_size ------ ', FLAGS.feature_size)
-    print('field_size -------- ', FLAGS.field_size)
-    print('num_epochs -------- ', FLAGS.num_epochs)
-    print('batch_size -------- ', FLAGS.batch_size)
-    print('loss -------------- ', FLAGS.loss)
-    print('optimizer --------- ', FLAGS.optimizer)
-    print('learning_rate ----- ', FLAGS.learning_rate)
-    print('l2_reg ------------ ', FLAGS.l2_reg)
+    print('input_dir ---------- ', FLAGS.input_dir)
+    print('model_dir ---------- ', FLAGS.model_dir)
+    print('file_name ---------- ', FLAGS.file_name)
+    print('task_mode ---------- ', FLAGS.task_mode)
+    print('feature_size ------- ', FLAGS.feature_size)
+    print('field_size --------- ', FLAGS.field_size)
+    print('num_epochs --------- ', FLAGS.num_epochs)
+    print('batch_size --------- ', FLAGS.batch_size)
+    print('loss_mode ---------- ', FLAGS.loss_mode)
+    print('optimizer ---------- ', FLAGS.optimizer)
+    print('learning_rate ------ ', FLAGS.learning_rate)
+    print('l2_reg_lambda ------ ', FLAGS.l2_reg_lambda)
     print("train_files: ", train_files)
     print("valid_files: ", valid_files)
     print("tests_files: ", tests_files)
 
 
 def main(_):
-    print('==================== 1.Check Arguments and Print Init Info...')
+    print("==================== 1.Check Args and Initialized Distributed Env...")
     if FLAGS.file_name == "":       # 存储算法模型文件名称[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.file_name = 'ch01_LR_' + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.file_name = "ch01_LR_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.file_name
     if FLAGS.input_dir == "":       # windows环境测试[未指定data目录条件下]
         root_dir = os.path.dirname(os.path.dirname(os.getcwd()))
-        FLAGS.input_dir = root_dir + '\\data' + '\\criteo_data_set\\'
+        FLAGS.input_dir = root_dir + "\\data" + "\\criteo_data_set\\"
 
-    train_files = glob.glob("%s/train*set" % FLAGS.input_dir)    # 获取指定目录下train文件
-    random.shuffle(train_files)
-    valid_files = glob.glob("%s/valid*set" % FLAGS.input_dir)    # 获取指定目录下valid文件
-    tests_files = glob.glob("%s/tests*set" % FLAGS.input_dir)    # 获取指定目录下tests文件
+    train_files = glob.glob("%s/train*set" % FLAGS.input_dir)       # 获取指定目录下train文件
+    random.shuffle(train_files)                                     # 打散train文件
+    valid_files = glob.glob("%s/valid*set" % FLAGS.input_dir)       # 获取指定目录下valid文件
+    tests_files = glob.glob("%s/tests*set" % FLAGS.input_dir)       # 获取指定目录下tests文件
     _print_init_info(train_files, valid_files, tests_files)
 
-    print('==================== 2.Clear Existed Model and Initialized Distributed Environment...')
     if FLAGS.clr_mode:          # 删除已存在的模型文件
         try:
             shutil.rmtree(FLAGS.model_dir)      # 递归删除目录下的目录及文件
@@ -242,21 +239,21 @@ def main(_):
             print("Existed model cleared at %s folder" % FLAGS.model_dir)
     distributed_env_set()       # 分布式环境设置
 
-    print('==================== 3.Build LR model...')
+    print("==================== 2.Set model params and Build LR model...")
     model_params = {
-        "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
+        "field_size": FLAGS.field_size,
         "learning_rate": FLAGS.learning_rate,
-        "l2_reg": FLAGS.l2_reg,
+        "l2_reg_lambda": FLAGS.l2_reg_lambda,
     }
-    session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_threads})
+    session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_thread})
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
     lr = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
                                 params=model_params, config=config)
 
-    print('==================== 4.Apply LR model...')
+    print("==================== 3.Apply LR model to diff tasks...")
     train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
     if FLAGS.task_mode == 'train':
         train_spec = tf.estimator.TrainSpec(
