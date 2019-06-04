@@ -89,8 +89,8 @@ def model_fn(features, labels, mode, params):
 
     # ---------- initial weights ----------- #
     # [numeric_feature, one-hot categorical_feature]
-    fm_b = tf.get_variable(name="fm_b", shape=[1], initializer=tf.constant_initializer(0.0))
-    fm_w = tf.get_variable(name="fm_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
+    coe_b = tf.get_variable(name="coe_b", shape=[1], initializer=tf.constant_initializer(0.0))
+    coe_w = tf.get_variable(name="coe_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
 
     # ---------- reshape feature ----------- #
     feat_idx = features["feat_idx"]         # 非零特征位置[batch_size, field_size, 1]
@@ -98,19 +98,20 @@ def model_fn(features, labels, mode, params):
     feat_val = features["feat_val"]         # 非零特征的值[batch_size, field_size, 1]
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
-    # ----- define f(x) ----- #
-    # LR: y = w0 + sum<wi,xi>
-    with tf.variable_scope("First-order"):
-        feat_wgt = tf.nn.embedding_lookup(fm_w, feat_idx)               # [Batch, Field]
+    # ------------- define f(x) ------------ #
+    # LR: y = sum<wi,xi> + b
+    with tf.variable_scope("First-Order"):
+        feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)              # [Batch, Field]
         y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # [Batch]
 
-    with tf.variable_scope("LR-out"):
-        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)             # [Batch]
+    with tf.variable_scope("LR-Out"):
+        y_bias = coe_b * tf.ones_like(y_w, dtype=tf.float32)            # [Batch]
         y_hat = y_bias + y_w                                            # [Batch]
         y_pred = tf.nn.sigmoid(y_hat)                                   # [Batch]
 
     # ----- mode: predict/evaluate/train ----- #
     # predict: 不计算loss/metric; evaluate: 不进行梯度下降和参数更新
+
     # Provide an estimator spec for 'ModeKeys.PREDICT'
     predictions = {"prob": y_pred}
     export_outputs = {
@@ -120,9 +121,9 @@ def model_fn(features, labels, mode, params):
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
 
     # Provide an estimator spec for 'ModeKeys.EVAL'
-    if FLAGS.loss == "log_loss":
+    if FLAGS.loss_mode == "log_loss":
         loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) +\
-               l2_reg * tf.nn.l2_loss(fm_w)
+               l2_reg_lambda * tf.nn.l2_loss(coe_w)
     else:
         loss = tf.reduce_mean(tf.square(labels-y_pred))
     eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
@@ -269,7 +270,7 @@ def main(_):
         preds = lr.predict(
             input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
-        with open(FLAGS.data_dir+"/tests_pred.txt", "w") as fo:
+        with open(FLAGS.input_dir+"/tests_pred.txt", "w") as fo:
             for prob in preds:
                 fo.write("%f\n" % (prob['prob']))
     elif FLAGS.task_mode == 'export':
@@ -277,7 +278,7 @@ def main(_):
             "feat_idx": tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name="feat_idx"),
             "feat_val": tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name="feat_val")}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        lr.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
+        lr.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
