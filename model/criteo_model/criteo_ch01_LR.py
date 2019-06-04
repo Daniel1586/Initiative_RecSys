@@ -50,19 +50,19 @@ FLAGS = flags.FLAGS
 # 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1 160:1 162:1 176:1 209:1 227:1
 # 264:1 273:1 312:1 335:1 387:1 395:1 404:1 407:1 427:1 434:1 443:1 466:1 479:1
 def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
-    print('Parsing ----------- ', filenames)
+    print("Parsing ----------- ", filenames)
 
     def dataset_etl(line):
-        feat_raw = tf.string_split([line], ' ')
+        feat_raw = tf.string_split([line], " ")
         labels = tf.string_to_number(feat_raw.values[0], out_type=tf.float32)
-        splits = tf.string_split(feat_raw.values[1:], ':')
+        splits = tf.string_split(feat_raw.values[1:], ":")
         idx_val = tf.reshape(splits.values, splits.dense_shape)
         feat_idx, feat_val = tf.split(idx_val, num_or_size_splits=2, axis=1)    # 切割张量
         feat_idx = tf.string_to_number(feat_idx, out_type=tf.int32)             # [field_size, 1]
         feat_val = tf.string_to_number(feat_val, out_type=tf.float32)           # [field_size, 1]
         return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
 
-    # extract lines from input files[one filename or filename list] using the Dataset API,
+    # extract lines from input files[filename or filename list] using the Dataset API,
     # multi-thread pre-process then prefetch some certain amount of data[6400]
     dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(6400)
 
@@ -81,18 +81,18 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
 
 def model_fn(features, labels, mode, params):
 
-    # ----- hyper-parameters ----- #
-    l2_reg = params["l2_reg"]
-    field_size = params["field_size"]
+    # ---------- hyper-parameters ---------- #
     feature_size = params["feature_size"]
+    field_size = params["field_size"]
     learning_rate = params["learning_rate"]
+    l2_reg_lambda = params["l2_reg_lambda"]
 
-    # ----- initial weights ----- #
+    # ---------- initial weights ----------- #
     # [numeric_feature, one-hot categorical_feature]
     fm_b = tf.get_variable(name="fm_b", shape=[1], initializer=tf.constant_initializer(0.0))
     fm_w = tf.get_variable(name="fm_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
 
-    # ----- reshape feature ----- #
+    # ---------- reshape feature ----------- #
     feat_idx = features["feat_idx"]         # 非零特征位置[batch_size, field_size, 1]
     feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # [Batch, Field]
     feat_val = features["feat_val"]         # 非零特征的值[batch_size, field_size, 1]
