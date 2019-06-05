@@ -35,9 +35,9 @@ flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Servi
 flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
 flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
-flags.DEFINE_integer("batch_size", 64, "Number of batch size")
-flags.DEFINE_integer("log_steps", 5000, "Save summary every steps")
+flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
+flags.DEFINE_integer("batch_size", 128, "Number of batch size")
+flags.DEFINE_integer("log_steps", 1406, "Save summary every steps")
 flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
@@ -49,7 +49,7 @@ FLAGS = flags.FLAGS
 # 8:0.04 9:0.008 10:0.166667 11:0.1 12:0 13:0.08
 # 16:1 54:1 77:1 93:1 112:1 124:1 128:1 148:1 160:1 162:1 176:1 209:1 227:1
 # 264:1 273:1 312:1 335:1 387:1 395:1 404:1 407:1 427:1 434:1 443:1 466:1 479:1
-def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
+def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
     print("Parsing ----------- ", filenames)
 
     def dataset_etl(line):
@@ -71,8 +71,8 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=False):
         dataset = dataset.shuffle(buffer_size=256)
 
     # epochs from blending together
-    dataset = dataset.repeat(num_epochs)
     dataset = dataset.batch(batch_size)
+    dataset = dataset.repeat(num_epochs)
     iterator = dataset.make_one_shot_iterator()
     batch_features, batch_labels = iterator.get_next()      # [batch_size, field_size, 1]
 
@@ -262,7 +262,7 @@ def main(_):
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
-            steps=None, start_delay_secs=200, throttle_secs=300)
+            steps=None, start_delay_secs=500, throttle_secs=600)
         tf.estimator.train_and_evaluate(lr, train_spec, eval_spec)
     elif FLAGS.task_mode == 'eval':
         lr.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
