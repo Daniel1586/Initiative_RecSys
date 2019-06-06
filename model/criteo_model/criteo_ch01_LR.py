@@ -30,12 +30,12 @@ flags.DEFINE_integer("num_thread", 4, "Number of threads")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("file_name", "", "File for save model")
-flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
+flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
 flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
+flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 128, "Number of batch size")
 flags.DEFINE_integer("log_steps", 1406, "Save summary every steps")
 flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
@@ -231,7 +231,7 @@ def main(_):
     tests_files = glob.glob("%s/tests*set" % FLAGS.input_dir)       # 获取指定目录下tests文件
     _print_init_info(train_files, valid_files, tests_files)
 
-    if FLAGS.clr_mode:          # 删除已存在的模型文件
+    if FLAGS.clr_mode and FLAGS.task_mode == "train":               # 删除已存在的模型文件
         try:
             shutil.rmtree(FLAGS.model_dir)      # 递归删除目录下的目录及文件
         except Exception as e:
@@ -256,7 +256,7 @@ def main(_):
 
     print("==================== 3.Apply LR model to diff tasks...")
     train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
-    if FLAGS.task_mode == 'train':
+    if FLAGS.task_mode == "train":
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
             max_steps=train_step)
@@ -264,9 +264,9 @@ def main(_):
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=500, throttle_secs=600)
         tf.estimator.train_and_evaluate(lr, train_spec, eval_spec)
-    elif FLAGS.task_mode == 'eval':
+    elif FLAGS.task_mode == "eval":
         lr.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
-    elif FLAGS.task_mode == 'infer':
+    elif FLAGS.task_mode == "infer":
         preds = lr.predict(
             input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
