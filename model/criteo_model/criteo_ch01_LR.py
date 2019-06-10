@@ -66,9 +66,9 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
     # multi-thread pre-process then prefetch some certain amount of data[6400]
     dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(6400)
 
-    # randomize the input data with a window of 256 elements (read into memory)
+    # randomize the input data with a window of 512 elements (read into memory)
     if perform_shuffle:
-        dataset = dataset.shuffle(buffer_size=256)
+        dataset = dataset.shuffle(buffer_size=512)
 
     # epochs from blending together
     dataset = dataset.batch(batch_size)
@@ -273,7 +273,7 @@ def main(_):
         with open(FLAGS.input_dir+"/tests_pred.txt", "w") as fo:
             for prob in preds:
                 fo.write("%f\n" % (prob['prob']))
-    elif FLAGS.task_mode == 'export':
+    elif FLAGS.task_mode == "export":
         feature_spec = {
             "feat_idx": tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name="feat_idx"),
             "feat_val": tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name="feat_val")}
