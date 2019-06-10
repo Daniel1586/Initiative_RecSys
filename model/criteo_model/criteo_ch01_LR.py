@@ -105,8 +105,8 @@ def model_fn(features, labels, mode, params):
         y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # [Batch]
 
     with tf.variable_scope("LR-Out"):
-        y_bias = coe_b * tf.ones_like(y_w, dtype=tf.float32)            # [Batch]
-        y_hat = y_bias + y_w                                            # [Batch]
+        y_b = coe_b * tf.ones_like(y_w, dtype=tf.float32)               # [Batch]
+        y_hat = y_b + y_w                                               # [Batch]
         y_pred = tf.nn.sigmoid(y_hat)                                   # [Batch]
 
     # ----- mode: predict/evaluate/train ----- #
