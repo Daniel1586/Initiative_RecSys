@@ -99,7 +99,7 @@ def model_fn(features, labels, mode, params):
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
     # ------------- define f(x) ------------ #
-    # LR: y = sum<wi,xi> + b
+    # LR: y = b + sum<wi,xi>
     with tf.variable_scope("First-Order"):
         feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)              # [Batch, Field]
         y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # [Batch]
