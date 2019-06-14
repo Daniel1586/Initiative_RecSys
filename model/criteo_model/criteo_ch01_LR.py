@@ -245,7 +245,7 @@ def main(_):
         "feature_size": FLAGS.feature_size,
         "field_size": FLAGS.field_size,
         "learning_rate": FLAGS.learning_rate,
-        "l2_reg_lambda": FLAGS.l2_reg_lambda,
+        "l2_reg_lambda": FLAGS.l2_reg_lambda
     }
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_thread})
     config = tf.estimator.RunConfig().replace(session_config=session_config,
