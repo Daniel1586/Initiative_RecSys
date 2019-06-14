@@ -20,35 +20,33 @@ import shutil
 import tensorflow as tf
 from datetime import date, timedelta
 
-# =================== CMD Arguments for PNN/FNN model =================== #
+# =================== CMD Arguments for FNN/PNN model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
-flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
-flags.DEFINE_string("task_mode", "train", "{train, infer, eval, export}")
-flags.DEFINE_string("model_type", "Inner", "model type {FNN, Inner, Outer}")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_index", None, "Index of task within the job")
-flags.DEFINE_integer("num_threads", 4, "Number of threads")
-flags.DEFINE_string("data_dir", "", "Data dir")
-flags.DEFINE_string("model_dir", "", "Model check point dir")
-flags.DEFINE_string("mark_dir", "", "Mark different model")
-flags.DEFINE_string("servable_model_dir", "", "export servable model for TensorFlow Serving")
-flags.DEFINE_integer("feature_size", 1842, "Number of features")
+flags.DEFINE_integer("num_thread", 4, "Number of threads")
+flags.DEFINE_string("input_dir", "", "Input data dir")
+flags.DEFINE_string("model_dir", "", "Model check point file dir")
+flags.DEFINE_string("file_name", "", "File for save model")
+flags.DEFINE_string("algorithm", "FNN", "Algorithm type {FNN, Inner, Outer}")
+flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
+flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
+flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
+flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("embedding_size", 10, "Embedding size")
-flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
-flags.DEFINE_integer("batch_size", 64, "Number of batch size")
-flags.DEFINE_integer("log_steps", 5000, "Save summary every steps")
-flags.DEFINE_string("loss", "log_loss", "{log_loss, square_loss}")
+flags.DEFINE_integer("embed_size", 10, "Embedding size[length of hidden vector of xi/xj]")
+flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
+flags.DEFINE_integer("batch_size", 128, "Number of batch size")
+flags.DEFINE_integer("log_steps", 1406, "Save summary every steps")
+flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
-flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
-flags.DEFINE_string("deep_layers", "256,128,64", "deep layers")
-flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
-flags.DEFINE_boolean("batch_norm", False, "perform batch normalization (True or False)")
-flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(decay=0.9)")
+flags.DEFINE_float("l2_reg_lambda", 0.0001, "L2 regularization")
+flags.DEFINE_string("deep_layers", "256,128,64", "Deep layers")
+flags.DEFINE_string("dropout", "0.5,0.5,0.5", "Dropout rate")
 FLAGS = flags.FLAGS
 
 
@@ -88,22 +86,22 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
 
 def model_fn(features, labels, mode, params):
 
-    # ----- hyper-parameters ----- #
-    l2_reg = params["l2_reg"]
-    field_size = params["field_size"]
+    # ---------- hyper-parameters ---------- #
     feature_size = params["feature_size"]
-    embedding_size = params["embedding_size"]
+    field_size = params["field_size"]
+    embed_size = params["embed_size"]
     learning_rate = params["learning_rate"]
+    l2_reg_lambda = params["l2_reg_lambda"]
     layers = list(map(int, params["deep_layers"].split(',')))   # l1神经元数量等于D1长度
     dropout = list(map(float, params["dropout"].split(',')))
     num_pairs = int(field_size * (field_size - 1) / 2)
 
     # ---------- initial weights ----------- #
     # [numeric_feature, one-hot categorical_feature]统一做embedding
-    glob_bias = tf.get_variable(name='feat_bias', shape=[1], initializer=tf.constant_initializer(0.0))
-    feat_weig = tf.get_variable(name='feat_weig', shape=[feature_size], initializer=tf.constant_initializer(0.0))
-    feat_embd = tf.get_variable(name='feat_embd', shape=[feature_size, embedding_size],
-                                initializer=tf.glorot_normal_initializer())
+    coe_b = tf.get_variable(name="coe_b", shape=[1], initializer=tf.constant_initializer(0.0))
+    coe_w = tf.get_variable(name="coe_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
+    coe_v = tf.get_variable(name="coe_v", shape=[feature_size, embed_size],
+                            initializer=tf.glorot_normal_initializer())
 
     # ---------- reshape feature ----------- #
     feat_idx = features["feat_idx"]         # 非零特征位置[batch_size, field_size, 1]
