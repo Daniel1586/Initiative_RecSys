@@ -102,7 +102,7 @@ def model_fn(features, labels, mode, params):
     feat_val = features["feat_val"]         # 非零特征的值[batch_size, field_size, 1]
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
-    # ----- define f(x) ----- #
+    # ------------- define f(x) ------------ #
     # FM: y = b + sum<wi,xi> + sum(<vi,vj>xi*xj)
     with tf.variable_scope("First-Order"):
         feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)              # [Batch, Field]
