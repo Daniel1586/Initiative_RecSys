@@ -109,13 +109,13 @@ def model_fn(features, labels, mode, params):
     feat_val = features["feat_val"]         # 非零特征的值[batch_size, field_size, 1]
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
-    # ----- define f(x) ----- #
-    with tf.variable_scope("Linear-part"):
-        feat_wgt = tf.nn.embedding_lookup(feat_weig, feat_idx)          # [Batch, Field]
+    # ------------- define f(x) ------------ #
+    with tf.variable_scope("Linear-Part"):
+        feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)          # [Batch, Field]
         y_linear = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)    # [Batch]
 
-    with tf.variable_scope("Embedding-layer"):
-        embeddings = tf.nn.embedding_lookup(feat_embd, feat_idx)        # [Batch, Field, K]
+    with tf.variable_scope("Embed-Layer"):
+        embeddings = tf.nn.embedding_lookup(coe_v, feat_idx)        # [Batch, Field, K]
         feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # [Batch, Field, 1]
         embeddings = tf.multiply(embeddings, feat_vals)                 # [Batch, Field, K]
 
@@ -189,9 +189,9 @@ def model_fn(features, labels, mode, params):
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
 
     # Provide an estimator spec for 'ModeKeys.EVAL'
-    if FLAGS.loss == "log_loss":
+    if FLAGS.loss_mode == "log_loss":
         loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) +\
-               l2_reg * tf.nn.l2_loss(feat_weig) + l2_reg * tf.nn.l2_loss(feat_embd)
+               l2_reg_lambda * tf.nn.l2_loss(coe_w) + l2_reg_lambda * tf.nn.l2_loss(coe_v)
     else:
         loss = tf.reduce_mean(tf.square(labels-y_pred))
     eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
@@ -277,24 +277,22 @@ def distributed_env_set():
 
 # print initial information of paras,打印初始化参数信息
 def _print_init_info(train_files, valid_files, tests_files):
-    print('task_mode --------- ', FLAGS.task_mode)
+    print("input_dir ---------- ", FLAGS.input_dir)
+    print("model_dir ---------- ", FLAGS.model_dir)
+    print("file_name ---------- ", FLAGS.file_name)
+    print("task_mode ---------- ", FLAGS.task_mode)
+    print("feature_size ------- ", FLAGS.feature_size)
+    print("field_size --------- ", FLAGS.field_size)
+    print("embed_size --------- ", FLAGS.embed_size)
+    print("num_epochs --------- ", FLAGS.num_epochs)
+    print("batch_size --------- ", FLAGS.batch_size)
+    print("loss_mode ---------- ", FLAGS.loss_mode)
+    print("optimizer ---------- ", FLAGS.optimizer)
+    print("learning_rate ------ ", FLAGS.learning_rate)
+    print("l2_reg_lambda ------ ", FLAGS.l2_reg_lambda)
     print('model_type -------- ', FLAGS.model_type)
-    print('data_dir ---------- ', FLAGS.data_dir)
-    print('model_dir --------- ', FLAGS.model_dir)
-    print('mark_dir ---------- ', FLAGS.mark_dir)
-    print('feature_size ------ ', FLAGS.feature_size)
-    print('field_size -------- ', FLAGS.field_size)
-    print('embedding_size ---- ', FLAGS.embedding_size)
-    print('num_epochs -------- ', FLAGS.num_epochs)
-    print('batch_size -------- ', FLAGS.batch_size)
-    print('loss -------------- ', FLAGS.loss)
-    print('optimizer --------- ', FLAGS.optimizer)
-    print('learning_rate ----- ', FLAGS.learning_rate)
-    print('l2_reg ------------ ', FLAGS.l2_reg)
     print('deep_layers ------- ', FLAGS.deep_layers)
     print('dropout ----------- ', FLAGS.dropout)
-    print('batch_norm -------- ', FLAGS.batch_norm)
-    print('batch_norm_decay -- ', FLAGS.batch_norm_decay)
     print("train_files: ", train_files)
     print("valid_files: ", valid_files)
     print("tests_files: ", tests_files)
