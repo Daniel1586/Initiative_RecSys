@@ -123,7 +123,7 @@ def model_fn(features, labels, mode, params):
     with tf.variable_scope("Product-Layer"):
         if FLAGS.algorithm == "FNN":
             feat_vec = tf.reshape(embeddings, shape=[-1, field_size*embed_size])
-            deep_inputs = tf.concat([feat_wgt, feat_vec], 1)
+            deep_inputs = tf.concat([feat_wgt, feat_vec], 1)            # [Batch, (Field+1)*K]
         elif FLAGS.model_type == "Inner":
             row = []
             col = []
@@ -154,21 +154,27 @@ def model_fn(features, labels, mode, params):
                                     1)  # None * ( F*K+F*(F-1)/2*K*K )
 
     with tf.variable_scope("Deep-Layer"):
+        # hidden layer
         for i in range(len(layers)):
             deep_inputs = tf.contrib.layers.fully_connected(
-                inputs=deep_inputs, num_outputs=layers[i], scope='mlp_%d' % i,
+                inputs=deep_inputs, num_outputs=layers[i], scope="mlp_%d" % i,
                 weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda))
             if mode == tf.estimator.ModeKeys.TRAIN:
                 deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])
 
-        y_deep = tf.contrib.layers.fully_connected(
+        # output layer
+        y_d = tf.contrib.layers.fully_connected(
             inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity,
             weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda), scope='deep_out')
-        y_d = tf.reshape(y_deep, shape=[-1])
+        y_deep = tf.reshape(y_d, shape=[-1])
 
-    with tf.variable_scope("PNN-Out"):
-        y_bias = coe_b * tf.ones_like(y_d, dtype=tf.float32)
-        y_hat = y_bias + y_linear + y_d
+    with tf.variable_scope("FPNN-Out"):
+        if FLAGS.algorithm == "FNN":
+            y_bias = coe_b * tf.ones_like(y_deep, dtype=tf.float32)
+            y_hat = y_bias + y_deep
+        else:
+            y_bias = coe_b * tf.ones_like(y_deep, dtype=tf.float32)
+            y_hat = y_bias + y_linear + y_deep
         y_pred = tf.nn.sigmoid(y_hat)
 
     # ----- mode: predict/evaluate/train ----- #
@@ -208,16 +214,6 @@ def model_fn(features, labels, mode, params):
 
     if mode == tf.estimator.ModeKeys.TRAIN:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
-
-
-# Implementation of Batch normalization, train/infer
-def batch_norm_layer(x, train_phase, scope_bn):
-    bn_train = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True,
-                                            updates_collections=None, is_training=True,  reuse=None, scope=scope_bn)
-    bn_infer = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True,
-                                            updates_collections=None, is_training=False, reuse=True, scope=scope_bn)
-    z = tf.cond(tf.cast(train_phase, tf.bool), lambda: bn_train, lambda: bn_infer)
-    return z
 
 
 # Initialized Distributed Environment,初始化分布式环境
@@ -295,7 +291,7 @@ def _print_init_info(train_files, valid_files, tests_files):
 def main(_):
     print("==================== 1.Check Args and Initialized Distributed Env...")
     if FLAGS.file_name == "":       # 存储算法模型文件名称[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.file_name = "ch05_FNN&PNN_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.file_name = "ch05_FNN_PNN_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.file_name
     if FLAGS.input_dir == "":       # windows环境测试[未指定data目录条件下]
         root_dir = os.path.dirname(os.path.dirname(os.getcwd()))
