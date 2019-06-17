@@ -280,6 +280,7 @@ def _print_init_info(train_files, valid_files, tests_files):
     print("input_dir ---------- ", FLAGS.input_dir)
     print("model_dir ---------- ", FLAGS.model_dir)
     print("file_name ---------- ", FLAGS.file_name)
+    print("algorithm ---------- ", FLAGS.algorithm)
     print("task_mode ---------- ", FLAGS.task_mode)
     print("feature_size ------- ", FLAGS.feature_size)
     print("field_size --------- ", FLAGS.field_size)
@@ -290,9 +291,8 @@ def _print_init_info(train_files, valid_files, tests_files):
     print("optimizer ---------- ", FLAGS.optimizer)
     print("learning_rate ------ ", FLAGS.learning_rate)
     print("l2_reg_lambda ------ ", FLAGS.l2_reg_lambda)
-    print('model_type -------- ', FLAGS.model_type)
-    print('deep_layers ------- ', FLAGS.deep_layers)
-    print('dropout ----------- ', FLAGS.dropout)
+    print("deep_layers -------- ", FLAGS.deep_layers)
+    print("dropout ------------ ", FLAGS.dropout)
     print("train_files: ", train_files)
     print("valid_files: ", valid_files)
     print("tests_files: ", tests_files)
@@ -329,7 +329,7 @@ def main(_):
         "embed_size": FLAGS.embed_size,
         "learning_rate": FLAGS.learning_rate,
         "l2_reg_lambda": FLAGS.l2_reg_lambda,
-		"deep_layers": FLAGS.deep_layers,
+        "deep_layers": FLAGS.deep_layers,
         "dropout": FLAGS.dropout,
         "algorithm": FLAGS.algorithm
     }
@@ -338,7 +338,7 @@ def main(_):
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
     fpnn = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
-                                 params=model_params, config=config)
+                                  params=model_params, config=config)
 
     print("==================== 3.Apply FNN/PNN model to diff tasks...")
     train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
