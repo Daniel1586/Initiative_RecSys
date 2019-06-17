@@ -87,6 +87,7 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
 def model_fn(features, labels, mode, params):
 
     # ---------- hyper-parameters ---------- #
+    algorithm = params["algorithm"]
     feature_size = params["feature_size"]
     field_size = params["field_size"]
     embed_size = params["embed_size"]
@@ -111,17 +112,18 @@ def model_fn(features, labels, mode, params):
 
     # ------------- define f(x) ------------ #
     with tf.variable_scope("Linear-Part"):
-        feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)          # [Batch, Field]
+        feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)              # [Batch, Field]
         y_linear = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)    # [Batch]
 
     with tf.variable_scope("Embed-Layer"):
-        embeddings = tf.nn.embedding_lookup(coe_v, feat_idx)        # [Batch, Field, K]
+        embeddings = tf.nn.embedding_lookup(coe_v, feat_idx)            # [Batch, Field, K]
         feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # [Batch, Field, 1]
         embeddings = tf.multiply(embeddings, feat_vals)                 # [Batch, Field, K]
 
-    with tf.variable_scope("Product-layer"):
-        if FLAGS.model_type == "FNN":
-            deep_inputs = tf.reshape(embeddings, shape=[-1, field_size*embedding_size])
+    with tf.variable_scope("Product-Layer"):
+        if FLAGS.algorithm == "FNN":
+            feat_vec = tf.reshape(embeddings, shape=[-1, field_size*embed_size])
+            deep_inputs = tf.concat([feat_wgt, feat_vec], 1)
         elif FLAGS.model_type == "Inner":
             row = []
             col = []
@@ -151,29 +153,21 @@ def model_fn(features, labels, mode, params):
             deep_inputs = tf.concat([tf.reshape(embeddings, shape=[-1, field_size * embedding_size]), outer],
                                     1)  # None * ( F*K+F*(F-1)/2*K*K )
 
-    with tf.variable_scope("Deep-layer"):
-        if mode == tf.estimator.ModeKeys.TRAIN:
-            train_phase = True
-        else:
-            train_phase = False
+    with tf.variable_scope("Deep-Layer"):
         for i in range(len(layers)):
             deep_inputs = tf.contrib.layers.fully_connected(
                 inputs=deep_inputs, num_outputs=layers[i], scope='mlp_%d' % i,
-                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg))
-            if FLAGS.batch_norm:
-                # <<https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md>>
-                # Batch normalization after Relu
-                deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' % i)
+                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda))
             if mode == tf.estimator.ModeKeys.TRAIN:
                 deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])
 
         y_deep = tf.contrib.layers.fully_connected(
             inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity,
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')
+            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda), scope='deep_out')
         y_d = tf.reshape(y_deep, shape=[-1])
 
-    with tf.variable_scope("PNN-out"):
-        y_bias = glob_bias * tf.ones_like(y_d, dtype=tf.float32)
+    with tf.variable_scope("PNN-Out"):
+        y_bias = coe_b * tf.ones_like(y_d, dtype=tf.float32)
         y_hat = y_bias + y_linear + y_d
         y_pred = tf.nn.sigmoid(y_hat)
 
