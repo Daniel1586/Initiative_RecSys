@@ -121,10 +121,10 @@ def model_fn(features, labels, mode, params):
         embeddings = tf.multiply(embeddings, feat_vals)                 # [Batch, Field, K]
 
     with tf.variable_scope("Product-Layer"):
-        if FLAGS.algorithm == "FNN":
+        if algorithm == "FNN":
             feat_vec = tf.reshape(embeddings, shape=[-1, field_size*embed_size])
             deep_inputs = tf.concat([feat_wgt, feat_vec], 1)            # [Batch, (Field+1)*K]
-        elif FLAGS.model_type == "Inner":
+        elif algorithm == "Inner":
             row = []
             col = []
             for i in range(field_size - 1):
@@ -136,7 +136,7 @@ def model_fn(features, labels, mode, params):
             inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])     # [Batch, num_pairs]
             deep_inputs = tf.concat(
                 [tf.reshape(embeddings, shape=[-1, field_size*embedding_size]), inner], 1)  # [Batch, num_pairs+F*K]
-        elif FLAGS.model_type == "Outer":
+        elif algorithm == "Outer":
             row = []
             col = []
             for i in range(field_size - 1):
