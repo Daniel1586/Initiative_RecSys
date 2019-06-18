@@ -31,7 +31,7 @@ flags.DEFINE_integer("num_thread", 4, "Number of threads")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("file_name", "", "File for save model")
-flags.DEFINE_string("algorithm", "FNN", "Algorithm type {FNN, IPNN, OPNN}")
+flags.DEFINE_string("algorithm", "IPNN", "Algorithm type {FNN, IPNN, OPNN}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
@@ -93,7 +93,7 @@ def model_fn(features, labels, mode, params):
     embed_size = params["embed_size"]
     learning_rate = params["learning_rate"]
     l2_reg_lambda = params["l2_reg_lambda"]
-    layers = list(map(int, params["deep_layers"].split(',')))   # l1神经元数量等于D1长度
+    layers = list(map(int, params["deep_layers"].split(',')))       # l1神经元数量等于D1长度
     dropout = list(map(float, params["dropout"].split(',')))
     num_pairs = int(field_size * (field_size - 1) / 2)
 
@@ -103,7 +103,11 @@ def model_fn(features, labels, mode, params):
     coe_w = tf.get_variable(name="coe_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
     coe_v = tf.get_variable(name="coe_v", shape=[feature_size, embed_size],
                             initializer=tf.glorot_normal_initializer())
-    coe_ipnn = tf.get_variable(name="coe_ipnn", shape=[feature_size, field_size],
+    coe_line = tf.get_variable(name="coe_line", shape=[feature_size, field_size],
+                               initializer=tf.glorot_normal_initializer())
+    coe_ipnn = tf.get_variable(name="coe_ipnn", shape=[field_size, layers[0]],
+                               initializer=tf.glorot_normal_initializer())
+    coe_opnn = tf.get_variable(name="coe_opnn", shape=[feature_size, field_size],
                                initializer=tf.glorot_normal_initializer())
 
     # ---------- reshape feature ----------- #
@@ -136,6 +140,10 @@ def model_fn(features, labels, mode, params):
                     col_j.append(j)
             fi = tf.gather(embeddings, row_i, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
             fj = tf.gather(embeddings, col_j, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
+
+            wp = tf.gather(coe_ipnn, row_i, axis=1)             # 根据索引从参数轴上收集切片[]
+
+            p = tf.reduce_sum(tf.multiply(fi, fj), 2)           # p矩阵展成向量[Batch, num_pairs]
 
             inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])     # [Batch, num_pairs]
             deep_inputs = tf.concat(
