@@ -31,7 +31,7 @@ flags.DEFINE_integer("num_thread", 4, "Number of threads")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("file_name", "", "File for save model")
-flags.DEFINE_string("algorithm", "FNN", "Algorithm type {FNN, Inner, Outer}")
+flags.DEFINE_string("algorithm", "FNN", "Algorithm type {FNN, IPNN, OPNN}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
@@ -124,7 +124,7 @@ def model_fn(features, labels, mode, params):
         if algorithm == "FNN":
             feat_vec = tf.reshape(embeddings, shape=[-1, field_size*embed_size])
             deep_inputs = tf.concat([feat_wgt, feat_vec], 1)            # [Batch, (Field+1)*K]
-        elif algorithm == "Inner":
+        elif algorithm == "IPNN":
             row = []
             col = []
             for i in range(field_size - 1):
@@ -136,7 +136,7 @@ def model_fn(features, labels, mode, params):
             inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])     # [Batch, num_pairs]
             deep_inputs = tf.concat(
                 [tf.reshape(embeddings, shape=[-1, field_size*embedding_size]), inner], 1)  # [Batch, num_pairs+F*K]
-        elif algorithm == "Outer":
+        elif algorithm == "OPNN":
             row = []
             col = []
             for i in range(field_size - 1):
