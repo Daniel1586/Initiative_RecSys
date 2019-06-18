@@ -103,6 +103,8 @@ def model_fn(features, labels, mode, params):
     coe_w = tf.get_variable(name="coe_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
     coe_v = tf.get_variable(name="coe_v", shape=[feature_size, embed_size],
                             initializer=tf.glorot_normal_initializer())
+    coe_ipnn = tf.get_variable(name="coe_ipnn", shape=[feature_size, field_size],
+                               initializer=tf.glorot_normal_initializer())
 
     # ---------- reshape feature ----------- #
     feat_idx = features["feat_idx"]         # 非零特征位置[batch_size, field_size, 1]
@@ -125,17 +127,19 @@ def model_fn(features, labels, mode, params):
             feat_vec = tf.reshape(embeddings, shape=[-1, field_size*embed_size])
             deep_inputs = tf.concat([feat_wgt, feat_vec], 1)            # [Batch, (Field+1)*K]
         elif algorithm == "IPNN":
-            row = []
-            col = []
+            # p_ij = g(fi,fj)=<fi,fj> 特征i和特征j的隐向量的内积
+            row_i = []
+            col_j = []
             for i in range(field_size - 1):
                 for j in range(i + 1, field_size):
-                    row.append(i)
-                    col.append(j)
-            p = tf.gather(embeddings, row, axis=1)      # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
-            q = tf.gather(embeddings, col, axis=1)      # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
+                    row_i.append(i)
+                    col_j.append(j)
+            fi = tf.gather(embeddings, row_i, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
+            fj = tf.gather(embeddings, col_j, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
+
             inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])     # [Batch, num_pairs]
             deep_inputs = tf.concat(
-                [tf.reshape(embeddings, shape=[-1, field_size*embedding_size]), inner], 1)  # [Batch, num_pairs+F*K]
+                [tf.reshape(embeddings, shape=[-1, field_size*embed_size]), inner], 1)  # [Batch, num_pairs+F*K]
         elif algorithm == "OPNN":
             row = []
             col = []
