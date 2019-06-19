@@ -31,7 +31,7 @@ flags.DEFINE_integer("num_thread", 4, "Number of threads")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("file_name", "", "File for save model")
-flags.DEFINE_string("algorithm", "IPNN", "Algorithm type {FNN, IPNN, OPNN}")
+flags.DEFINE_string("algorithm", "FNN", "Algorithm type {FNN, IPNN, OPNN}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
@@ -105,7 +105,7 @@ def model_fn(features, labels, mode, params):
                             initializer=tf.glorot_normal_initializer())
     coe_line = tf.get_variable(name="coe_line", shape=[feature_size, field_size],
                                initializer=tf.glorot_normal_initializer())
-    coe_ipnn = tf.get_variable(name="coe_ipnn", shape=[field_size, layers[0]],
+    coe_ipnn = tf.get_variable(name="coe_ipnn", shape=[layers[0], field_size],
                                initializer=tf.glorot_normal_initializer())
     coe_opnn = tf.get_variable(name="coe_opnn", shape=[feature_size, field_size],
                                initializer=tf.glorot_normal_initializer())
@@ -129,7 +129,8 @@ def model_fn(features, labels, mode, params):
     with tf.variable_scope("Product-Layer"):
         if algorithm == "FNN":
             feat_vec = tf.reshape(embeddings, shape=[-1, field_size*embed_size])
-            deep_inputs = tf.concat([feat_wgt, feat_vec], 1)            # [Batch, (Field+1)*K]
+            feat_bias = coe_b * tf.reshape(tf.ones_like(y_linear, dtype=tf.float32), shape=[-1, 1])
+            deep_inputs = tf.concat([feat_wgt, feat_vec, feat_bias], 1)     # [Batch, (Field+1)*K+1]
         elif algorithm == "IPNN":
             # p_ij = g(fi,fj)=<fi,fj> 特征i和特征j的隐向量的内积
             row_i = []
@@ -140,12 +141,11 @@ def model_fn(features, labels, mode, params):
                     col_j.append(j)
             fi = tf.gather(embeddings, row_i, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
             fj = tf.gather(embeddings, col_j, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
-
-            wp = tf.gather(coe_ipnn, row_i, axis=1)             # 根据索引从参数轴上收集切片[]
-
             p = tf.reduce_sum(tf.multiply(fi, fj), 2)           # p矩阵展成向量[Batch, num_pairs]
-
-            inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])     # [Batch, num_pairs]
+            wpi = tf.gather(coe_ipnn, row_i, axis=1)            # 根据索引从参数轴上收集切片[D1, num_pairs]
+            wpj = tf.gather(coe_ipnn, col_j, axis=1)            # 根据索引从参数轴上收集切片[D1, num_pairs]
+            wp = tf.multiply(wpi, wpj)                          # D1个W矩阵组成的矩阵(每行代表一个W)[D1, num_pairs]
+            inner = tf.matmul(p, tf.transpose(wp))              # [Batch, D1]
             deep_inputs = tf.concat(
                 [tf.reshape(embeddings, shape=[-1, field_size*embed_size]), inner], 1)  # [Batch, num_pairs+F*K]
         elif algorithm == "OPNN":
@@ -178,15 +178,9 @@ def model_fn(features, labels, mode, params):
         y_d = tf.contrib.layers.fully_connected(
             inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity,
             weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda), scope='deep_out')
-        y_deep = tf.reshape(y_d, shape=[-1])
 
     with tf.variable_scope("FPNN-Out"):
-        if FLAGS.algorithm == "FNN":
-            y_bias = coe_b * tf.ones_like(y_deep, dtype=tf.float32)
-            y_hat = y_bias + y_deep
-        else:
-            y_bias = coe_b * tf.ones_like(y_deep, dtype=tf.float32)
-            y_hat = y_bias + y_linear + y_deep
+        y_hat = tf.reshape(y_d, shape=[-1])
         y_pred = tf.nn.sigmoid(y_hat)
 
     # ----- mode: predict/evaluate/train ----- #
