@@ -31,7 +31,7 @@ flags.DEFINE_integer("num_thread", 4, "Number of threads")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("file_name", "", "File for save model")
-flags.DEFINE_string("algorithm", "FNN", "Algorithm type {FNN, IPNN, OPNN}")
+flags.DEFINE_string("algorithm", "IPNN", "Algorithm type {FNN, IPNN, OPNN}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
@@ -132,6 +132,7 @@ def model_fn(features, labels, mode, params):
             feat_bias = coe_b * tf.reshape(tf.ones_like(y_linear, dtype=tf.float32), shape=[-1, 1])
             deep_inputs = tf.concat([feat_wgt, feat_vec, feat_bias], 1)     # [Batch, (Field+1)*K+1]
         elif algorithm == "IPNN":
+            print("to be modified")
             # p_ij = g(fi,fj)=<fi,fj> 特征i和特征j的隐向量的内积
             row_i = []
             col_j = []
