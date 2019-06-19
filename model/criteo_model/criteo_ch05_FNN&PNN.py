@@ -162,8 +162,8 @@ def model_fn(features, labels, mode, params):
             # q = tf.reshape(q, [-1, num_pairs, embedding_size])
             # einsum('i,j->ij', p, q)  # output[i,j] = p[i]*q[j]				# Outer product
             outer = tf.reshape(tf.einsum('api,apj->apij', p, q),
-                               [-1, num_pairs * embedding_size * embedding_size])  # None * (F*(F-1)/2*K*K)
-            deep_inputs = tf.concat([tf.reshape(embeddings, shape=[-1, field_size * embedding_size]), outer],
+                               [-1, num_pairs * embed_size * embed_size])  # None * (F*(F-1)/2*K*K)
+            deep_inputs = tf.concat([tf.reshape(embeddings, shape=[-1, field_size * embed_size]), outer],
                                     1)  # None * ( F*K+F*(F-1)/2*K*K )
 
     with tf.variable_scope("Deep-Layer"):
