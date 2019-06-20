@@ -31,7 +31,7 @@ flags.DEFINE_integer("num_thread", 4, "Number of threads")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("file_name", "", "File for save model")
-flags.DEFINE_string("algorithm", "IPNN", "Algorithm type {FNN, IPNN, OPNN}")
+flags.DEFINE_string("algorithm", "OPNN", "Algorithm type {FNN, IPNN, OPNN}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
@@ -107,7 +107,7 @@ def model_fn(features, labels, mode, params):
                                initializer=tf.glorot_normal_initializer())
     coe_ipnn = tf.get_variable(name="coe_ipnn", shape=[layers[0], field_size],
                                initializer=tf.glorot_normal_initializer())
-    coe_opnn = tf.get_variable(name="coe_opnn", shape=[feature_size, field_size],
+    coe_opnn = tf.get_variable(name="coe_opnn", shape=[layers[0], embed_size, embed_size],
                                initializer=tf.glorot_normal_initializer())
 
     # ---------- reshape feature ----------- #
@@ -157,21 +157,21 @@ def model_fn(features, labels, mode, params):
             lb = coe_b * tf.reshape(tf.ones_like(y_linear, dtype=tf.float32), shape=[-1, 1])
             deep_inputs = lz + lp + lb                          # [Batch, D1]
         elif algorithm == "OPNN":
-            row = []
-            col = []
-            for i in range(field_size - 1):
-                for j in range(i + 1, field_size):
-                    row.append(i)
-                    col.append(j)
-            p = tf.gather(embeddings, row, axis=1)
-            q = tf.gather(embeddings, col, axis=1)
-            # p = tf.reshape(p, [-1, num_pairs, embedding_size])
-            # q = tf.reshape(q, [-1, num_pairs, embedding_size])
-            # einsum('i,j->ij', p, q)  # output[i,j] = p[i]*q[j]				# Outer product
-            outer = tf.reshape(tf.einsum('api,apj->apij', p, q),
-                               [-1, num_pairs * embed_size * embed_size])  # None * (F*(F-1)/2*K*K)
-            deep_inputs = tf.concat([tf.reshape(embeddings, shape=[-1, field_size * embed_size]), outer],
-                                    1)  # None * ( F*K+F*(F-1)/2*K*K )
+            # linear signal
+            z = tf.reshape(embeddings, shape=[-1, field_size*embed_size])   # [Batch, Field*K]
+            wz = tf.reshape(coe_line, shape=[-1, field_size*embed_size])    # [D1, Field*K]
+            lz = tf.matmul(z, tf.transpose(wz))                             # [Batch, D1]
+
+            # quadratic signal
+            f_sigma = tf.reduce_sum(embeddings, axis=1)                     # [Batch, K]
+            p = tf.matmul(tf.reshape(f_sigma, shape=[-1, embed_size, 1]),
+                          tf.reshape(f_sigma, shape=[-1, 1, embed_size]))   # [Batch, K, K]
+            p = tf.reshape(p, shape=[-1, embed_size*embed_size])            # [Batch, K*K]
+            wp = tf.reshape(coe_opnn, shape=[-1, embed_size*embed_size])    # [D1, K*K]
+            lp = tf.matmul(p, tf.transpose(wp))                             # [Batch, D1]
+
+            lb = coe_b * tf.reshape(tf.ones_like(y_linear, dtype=tf.float32), shape=[-1, 1])
+            deep_inputs = lz + lp + lb                                      # [Batch, D1]
 
     with tf.variable_scope("Deep-Layer"):
         # hidden layer
