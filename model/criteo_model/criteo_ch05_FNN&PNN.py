@@ -103,7 +103,7 @@ def model_fn(features, labels, mode, params):
     coe_w = tf.get_variable(name="coe_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
     coe_v = tf.get_variable(name="coe_v", shape=[feature_size, embed_size],
                             initializer=tf.glorot_normal_initializer())
-    coe_line = tf.get_variable(name="coe_line", shape=[feature_size, field_size],
+    coe_line = tf.get_variable(name="coe_line", shape=[layers[0], field_size, embed_size],
                                initializer=tf.glorot_normal_initializer())
     coe_ipnn = tf.get_variable(name="coe_ipnn", shape=[layers[0], field_size],
                                initializer=tf.glorot_normal_initializer())
@@ -132,8 +132,12 @@ def model_fn(features, labels, mode, params):
             feat_bias = coe_b * tf.reshape(tf.ones_like(y_linear, dtype=tf.float32), shape=[-1, 1])
             deep_inputs = tf.concat([feat_wgt, feat_vec, feat_bias], 1)     # [Batch, (Field+1)*K+1]
         elif algorithm == "IPNN":
-            print("to be modified")
-            # p_ij = g(fi,fj)=<fi,fj> 特征i和特征j的隐向量的内积
+            # linear signal
+            z = tf.reshape(embeddings, shape=[-1, field_size*embed_size])   # [Batch, Field*K]
+            wz = tf.reshape(coe_line, shape=[-1, field_size*embed_size])    # [D1, Field*K]
+            lz = tf.matmul(z, tf.transpose(wz))                             # [Batch, D1]
+
+            # quadratic signal
             row_i = []
             col_j = []
             for i in range(field_size - 1):
@@ -142,13 +146,16 @@ def model_fn(features, labels, mode, params):
                     col_j.append(j)
             fi = tf.gather(embeddings, row_i, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
             fj = tf.gather(embeddings, col_j, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
+
+            # p_ij = g(fi,fj)=<fi,fj> 特征i和特征j的隐向量的内积
             p = tf.reduce_sum(tf.multiply(fi, fj), 2)           # p矩阵展成向量[Batch, num_pairs]
             wpi = tf.gather(coe_ipnn, row_i, axis=1)            # 根据索引从参数轴上收集切片[D1, num_pairs]
             wpj = tf.gather(coe_ipnn, col_j, axis=1)            # 根据索引从参数轴上收集切片[D1, num_pairs]
             wp = tf.multiply(wpi, wpj)                          # D1个W矩阵组成的矩阵(每行代表一个W)[D1, num_pairs]
-            inner = tf.matmul(p, tf.transpose(wp))              # [Batch, D1]
-            deep_inputs = tf.concat(
-                [tf.reshape(embeddings, shape=[-1, field_size*embed_size]), inner], 1)  # [Batch, num_pairs+F*K]
+            lp = tf.matmul(p, tf.transpose(wp))                 # [Batch, D1]
+
+            lb = coe_b * tf.reshape(tf.ones_like(y_linear, dtype=tf.float32), shape=[-1, 1])
+            deep_inputs = lz + lp + lb                          # [Batch, D1]
         elif algorithm == "OPNN":
             row = []
             col = []
