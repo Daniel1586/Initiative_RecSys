@@ -4,7 +4,7 @@
 """
 <<FNN: Deep Learning over Multi-Field Categorical Data: A Case Study on User Response Prediction.>>
 <<PNN: Product-based Neural Networks for User Response Prediction.>>
-Implementation of FM model with the following features：
+Implementation of FNN/PNN model with the following features：
 #1 Input pipeline using Dataset API, Support parallel and prefetch.
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
