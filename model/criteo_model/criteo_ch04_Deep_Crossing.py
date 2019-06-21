@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-<<FM: Factorization Machines./Factorization Machines with libFM.>>
-Implementation of FM model with the following features：
+<<Deep Crossing - Web-Scale Modeling without Manually Crafted Combinatorial Features>>
+Implementation of Deep&Crossing model with the following features：
 #1 Input pipeline using Dataset API, Support parallel and prefetch.
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
@@ -19,7 +19,7 @@ import shutil
 import tensorflow as tf
 from datetime import date, timedelta
 
-# =================== CMD Arguments for FM model =================== #
+# =================== CMD Arguments for DC model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
@@ -43,6 +43,8 @@ flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
 flags.DEFINE_float("l2_reg_lambda", 0.0001, "L2 regularization")
+flags.DEFINE_string("deep_layers", "256,128,64", "Deep layers")
+flags.DEFINE_string("dropout", "0.5,0.5,0.5", "Dropout rate")
 FLAGS = flags.FLAGS
 
 
@@ -88,6 +90,9 @@ def model_fn(features, labels, mode, params):
     embed_size = params["embed_size"]
     learning_rate = params["learning_rate"]
     l2_reg_lambda = params["l2_reg_lambda"]
+    layers = list(map(int, params["deep_layers"].split(',')))       # l1神经元数量等于D1长度
+    dropout = list(map(float, params["dropout"].split(',')))
+    num_pairs = int(field_size * (field_size - 1) / 2)
 
     # ---------- initial weights ----------- #
     # [numeric_feature, one-hot categorical_feature]统一做embedding
@@ -95,6 +100,12 @@ def model_fn(features, labels, mode, params):
     coe_w = tf.get_variable(name="coe_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
     coe_v = tf.get_variable(name="coe_v", shape=[feature_size, embed_size],
                             initializer=tf.glorot_normal_initializer())
+    coe_line = tf.get_variable(name="coe_line", shape=[layers[0], field_size, embed_size],
+                               initializer=tf.glorot_normal_initializer())
+    coe_ipnn = tf.get_variable(name="coe_ipnn", shape=[layers[0], field_size],
+                               initializer=tf.glorot_normal_initializer())
+    coe_opnn = tf.get_variable(name="coe_opnn", shape=[layers[0], embed_size, embed_size],
+                               initializer=tf.glorot_normal_initializer())
 
     # ---------- reshape feature ----------- #
     feat_idx = features["feat_idx"]         # 非零特征位置[batch_size, field_size, 1]
@@ -102,24 +113,80 @@ def model_fn(features, labels, mode, params):
     feat_val = features["feat_val"]         # 非零特征的值[batch_size, field_size, 1]
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
-    # ----- define f(x) ----- #
-    # FM: y = b + sum<wi,xi> + sum(<vi,vj>xi*xj)
-    with tf.variable_scope("First-Order"):
+    # ------------- define f(x) ------------ #
+    with tf.variable_scope("Linear-Part"):
         feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)              # [Batch, Field]
-        y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # [Batch]
+        y_linear = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)    # [Batch]
 
-    with tf.variable_scope("Second-Order"):
+    with tf.variable_scope("Embed-Layer"):
         embeddings = tf.nn.embedding_lookup(coe_v, feat_idx)            # [Batch, Field, K]
         feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # [Batch, Field, 1]
         embeddings = tf.multiply(embeddings, feat_vals)                 # [Batch, Field, K]
-        sum_square = tf.square(tf.reduce_sum(embeddings, 1))            # [Batch, K]
-        square_sum = tf.reduce_sum(tf.square(embeddings), 1)            # [Batch, K]
-        y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum), 1)     # [Batch]
 
-    with tf.variable_scope("FM-Out"):
-        y_b = coe_b * tf.ones_like(y_w, dtype=tf.float32)       # [Batch]
-        y_hat = y_b + y_w + y_v                                 # [Batch]
-        y_pred = tf.nn.sigmoid(y_hat)                           # [Batch]
+    with tf.variable_scope("Product-Layer"):
+        if algorithm == "FNN":
+            feat_vec = tf.reshape(embeddings, shape=[-1, field_size*embed_size])
+            feat_bias = coe_b * tf.reshape(tf.ones_like(y_linear, dtype=tf.float32), shape=[-1, 1])
+            deep_inputs = tf.concat([feat_wgt, feat_vec, feat_bias], 1)     # [Batch, (Field+1)*K+1]
+        elif algorithm == "IPNN":
+            # linear signal
+            z = tf.reshape(embeddings, shape=[-1, field_size*embed_size])   # [Batch, Field*K]
+            wz = tf.reshape(coe_line, shape=[-1, field_size*embed_size])    # [D1, Field*K]
+            lz = tf.matmul(z, tf.transpose(wz))                             # [Batch, D1]
+
+            # quadratic signal
+            row_i = []
+            col_j = []
+            for i in range(field_size - 1):
+                for j in range(i + 1, field_size):
+                    row_i.append(i)
+                    col_j.append(j)
+            fi = tf.gather(embeddings, row_i, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
+            fj = tf.gather(embeddings, col_j, axis=1)           # 根据索引从参数轴上收集切片[Batch, num_pairs, K]
+
+            # p_ij = g(fi,fj)=<fi,fj> 特征i和特征j的隐向量的内积
+            p = tf.reduce_sum(tf.multiply(fi, fj), 2)           # p矩阵展成向量[Batch, num_pairs]
+            wpi = tf.gather(coe_ipnn, row_i, axis=1)            # 根据索引从参数轴上收集切片[D1, num_pairs]
+            wpj = tf.gather(coe_ipnn, col_j, axis=1)            # 根据索引从参数轴上收集切片[D1, num_pairs]
+            wp = tf.multiply(wpi, wpj)                          # D1个W矩阵组成的矩阵(每行代表一个W)[D1, num_pairs]
+            lp = tf.matmul(p, tf.transpose(wp))                 # [Batch, D1]
+
+            lb = coe_b * tf.reshape(tf.ones_like(y_linear, dtype=tf.float32), shape=[-1, 1])
+            deep_inputs = lz + lp + lb                          # [Batch, D1]
+        elif algorithm == "OPNN":
+            # linear signal
+            z = tf.reshape(embeddings, shape=[-1, field_size*embed_size])   # [Batch, Field*K]
+            wz = tf.reshape(coe_line, shape=[-1, field_size*embed_size])    # [D1, Field*K]
+            lz = tf.matmul(z, tf.transpose(wz))                             # [Batch, D1]
+
+            # quadratic signal
+            f_sigma = tf.reduce_sum(embeddings, axis=1)                     # [Batch, K]
+            p = tf.matmul(tf.reshape(f_sigma, shape=[-1, embed_size, 1]),
+                          tf.reshape(f_sigma, shape=[-1, 1, embed_size]))   # [Batch, K, K]
+            p = tf.reshape(p, shape=[-1, embed_size*embed_size])            # [Batch, K*K]
+            wp = tf.reshape(coe_opnn, shape=[-1, embed_size*embed_size])    # [D1, K*K]
+            lp = tf.matmul(p, tf.transpose(wp))                             # [Batch, D1]
+
+            lb = coe_b * tf.reshape(tf.ones_like(y_linear, dtype=tf.float32), shape=[-1, 1])
+            deep_inputs = lz + lp + lb                                      # [Batch, D1]
+
+    with tf.variable_scope("Deep-Layer"):
+        # hidden layer
+        for i in range(len(layers)):
+            deep_inputs = tf.contrib.layers.fully_connected(
+                inputs=deep_inputs, num_outputs=layers[i], scope="mlp_%d" % i,
+                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda))
+            if mode == tf.estimator.ModeKeys.TRAIN:
+                deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])
+
+        # output layer
+        y_d = tf.contrib.layers.fully_connected(
+            inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity,
+            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda), scope='deep_out')
+
+    with tf.variable_scope("FPNN-Out"):
+        y_hat = tf.reshape(y_d, shape=[-1])
+        y_pred = tf.nn.sigmoid(y_hat)
 
     # ----- mode: predict/evaluate/train ----- #
     # predict: 不计算loss/metric; evaluate: 不进行梯度下降和参数更新
@@ -224,6 +291,8 @@ def _print_init_info(train_files, valid_files, tests_files):
     print("optimizer ---------- ", FLAGS.optimizer)
     print("learning_rate ------ ", FLAGS.learning_rate)
     print("l2_reg_lambda ------ ", FLAGS.l2_reg_lambda)
+    print("deep_layers -------- ", FLAGS.deep_layers)
+    print("dropout ------------ ", FLAGS.dropout)
     print("train_files: ", train_files)
     print("valid_files: ", valid_files)
     print("tests_files: ", tests_files)
@@ -232,7 +301,7 @@ def _print_init_info(train_files, valid_files, tests_files):
 def main(_):
     print("==================== 1.Check Args and Initialized Distributed Env...")
     if FLAGS.file_name == "":       # 存储算法模型文件名称[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.file_name = "ch02_FM_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.file_name = "ch04_DC_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.file_name
     if FLAGS.input_dir == "":       # windows环境测试[未指定data目录条件下]
         root_dir = os.path.dirname(os.path.dirname(os.getcwd()))
@@ -253,22 +322,24 @@ def main(_):
             print("Existed model cleared at %s folder" % FLAGS.model_dir)
     distributed_env_set()       # 分布式环境设置
 
-    print("==================== 2.Set model params and Build FM model...")
+    print("==================== 2.Set model params and Build DC model...")
     model_params = {
         "feature_size": FLAGS.feature_size,
         "field_size": FLAGS.field_size,
         "embed_size": FLAGS.embed_size,
         "learning_rate": FLAGS.learning_rate,
         "l2_reg_lambda": FLAGS.l2_reg_lambda,
+        "deep_layers": FLAGS.deep_layers,
+        "dropout": FLAGS.dropout
     }
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_thread})
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-    fm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
+    dc = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
                                 params=model_params, config=config)
 
-    print("==================== 3.Apply FM model to diff tasks...")
+    print("==================== 3.Apply DC model to diff tasks...")
     train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
     if FLAGS.task_mode == "train":
         train_spec = tf.estimator.TrainSpec(
@@ -277,11 +348,11 @@ def main(_):
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=500, throttle_secs=600)
-        tf.estimator.train_and_evaluate(fm, train_spec, eval_spec)
+        tf.estimator.train_and_evaluate(dc, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
-        fm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        dc.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == "infer":
-        preds = fm.predict(
+        preds = dc.predict(
             input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
         with open(FLAGS.input_dir+"/tests_pred.txt", "w") as fo:
@@ -292,7 +363,7 @@ def main(_):
             "feat_idx": tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name="feat_idx"),
             "feat_val": tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name="feat_val")}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        fm.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
+        dc.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
