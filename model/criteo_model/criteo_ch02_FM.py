@@ -3,12 +3,13 @@
 
 """
 <<FM: Factorization Machines./Factorization Machines with libFM.>>
+<<Fast Context-aware Recommendations with Factorization Machines.>>
 Implementation of FM model with the following features：
 #1 Input pipeline using Dataset API, Support parallel and prefetch.
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
 #4 Support export_model for TensorFlow Serving.
-########## TF Version: 1.8.0 ##########
+########## TF Version: 1.8.0/Python Version: 3.6 ##########
 """
 
 import os
