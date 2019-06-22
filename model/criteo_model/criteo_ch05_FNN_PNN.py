@@ -9,7 +9,7 @@ Implementation of FNN/PNN model with the following features：
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
 #4 Support export_model for TensorFlow Serving.
-########## TF Version: 1.8.0 ##########
+########## TF Version: 1.8.0/Python Version: 3.6 ##########
 """
 
 import os
