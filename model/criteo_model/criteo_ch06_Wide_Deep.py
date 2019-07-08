@@ -109,8 +109,8 @@ def model_fn(features, labels, mode, params):
     # ------------- define f(x) ------------ #
     with tf.variable_scope("Wide-Layer"):
         # 论文里面包含人工组合的特征
-        feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)            # [Batch, Field]
-        y_wide = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)    # [Batch]
+        feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)              # [Batch, Field]
+        y_wide = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)      # [Batch]
 
     with tf.variable_scope("Embed-Layer"):
         embeddings = tf.nn.embedding_lookup(coe_v, feat_idx)            # [Batch, Field, K]
