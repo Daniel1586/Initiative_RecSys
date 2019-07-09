@@ -90,7 +90,7 @@ def model_fn(features, labels, mode, params):
     embed_size = params["embed_size"]
     learning_rate = params["learning_rate"]
     l2_reg_lambda = params["l2_reg_lambda"]
-    layers = list(map(int, params["deep_layers"].split(',')))       # l1神经元数量等于D1长度
+    layers = list(map(int, params["deep_layers"].split(',')))
     dropout = list(map(float, params["dropout"].split(',')))
 
     # ---------- initial weights ----------- #
@@ -106,14 +106,13 @@ def model_fn(features, labels, mode, params):
     feat_val = features["feat_val"]         # 非零特征的值[batch_size, field_size, 1]
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
-    # ----- define f(x) ----- #
-    # FM: y = w0 + <w,x> + sum(<vi,vj>xixj)
-    with tf.variable_scope("First-order"):
-        feat_wgt = tf.nn.embedding_lookup(fm_w, feat_idx)               # [Batch, Field]
+    # ------------- define f(x) ------------ #
+    with tf.variable_scope("First-Order"):
+        feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)              # [Batch, Field]
         y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # [Batch]
 
-    with tf.variable_scope("Second-order"):
-        embeddings = tf.nn.embedding_lookup(fm_v, feat_idx)             # [Batch, Field, K]
+    with tf.variable_scope("Second-Order"):
+        embeddings = tf.nn.embedding_lookup(coe_v, feat_idx)            # [Batch, Field, K]
         feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])     # [Batch, Field, 1]
         embeddings = tf.multiply(embeddings, feat_vals)                 # [Batch, Field, K]
         sum_square = tf.square(tf.reduce_sum(embeddings, 1))            # [Batch, K]
@@ -130,14 +129,15 @@ def model_fn(features, labels, mode, params):
             if mode == tf.estimator.ModeKeys.TRAIN:
                 deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])
 
-        y_deep = tf.contrib.layers.fully_connected(
+        # output layer
+        y_d = tf.contrib.layers.fully_connected(
             inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity,
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')
-        y_d = tf.reshape(y_deep, shape=[-1])
+            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda), scope='deep_out')
 
-    with tf.variable_scope("DeepFM-out"):
-        y_bias = fm_b * tf.ones_like(y_w, dtype=tf.float32)     # [Batch]
-        y_hat = y_bias + y_w + y_v + y_d                        # [Batch]
+    with tf.variable_scope("DeepFM-Out"):
+        y_deep = tf.reshape(y_d, shape=[-1])
+        y_bias = coe_b * tf.ones_like(y_w, dtype=tf.float32)    # [Batch]
+        y_hat = y_bias + y_w + y_v + y_deep                     # [Batch]
         y_pred = tf.nn.sigmoid(y_hat)                           # [Batch]
 
     # ----- mode: predict/evaluate/train ----- #
@@ -253,7 +253,7 @@ def _print_init_info(train_files, valid_files, tests_files):
 def main(_):
     print("==================== 1.Check Args and Initialized Distributed Env...")
     if FLAGS.file_name == "":       # 存储算法模型文件名称[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.file_name = "ch06_Wide_Deep_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.file_name = "ch07_DeepFM_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.file_name
     if FLAGS.input_dir == "":       # windows环境测试[未指定data目录条件下]
         root_dir = os.path.dirname(os.path.dirname(os.getcwd()))
@@ -288,10 +288,10 @@ def main(_):
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-    wd = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
-                                params=model_params, config=config)
+    dfm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
+                                 params=model_params, config=config)
 
-    print("==================== 3.Apply Wide&Deep model to diff tasks...")
+    print("==================== 3.Apply DeepFM model to diff tasks...")
     train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
     if FLAGS.task_mode == "train":
         train_spec = tf.estimator.TrainSpec(
@@ -300,11 +300,11 @@ def main(_):
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=500, throttle_secs=600)
-        tf.estimator.train_and_evaluate(wd, train_spec, eval_spec)
+        tf.estimator.train_and_evaluate(dfm, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
-        wd.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        dfm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == "infer":
-        preds = wd.predict(
+        preds = dfm.predict(
             input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
         with open(FLAGS.input_dir+"/tests_pred.txt", "w") as fo:
@@ -315,7 +315,7 @@ def main(_):
             "feat_idx": tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name="feat_idx"),
             "feat_val": tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name="feat_val")}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        wd.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
+        dfm.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
