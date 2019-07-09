@@ -90,7 +90,7 @@ def model_fn(features, labels, mode, params):
     embed_size = params["embed_size"]
     learning_rate = params["learning_rate"]
     l2_reg_lambda = params["l2_reg_lambda"]
-    layers = list(map(int, params["deep_layers"].split(',')))       # l1神经元数量等于D1长度
+    layers = list(map(int, params["deep_layers"].split(',')))
     dropout = list(map(float, params["dropout"].split(',')))
 
     # ---------- initial weights ----------- #
