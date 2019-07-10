@@ -43,6 +43,7 @@ flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
 flags.DEFINE_float("l2_reg_lambda", 0.0001, "L2 regularization")
+flags.DEFINE_integer("cross_layers", 3, "Cross layers, polynomial degree")
 flags.DEFINE_string("deep_layers", "256,128,64", "Deep layers")
 flags.DEFINE_string("dropout", "0.5,0.5,0.5", "Dropout rate")
 FLAGS = flags.FLAGS
@@ -91,14 +92,18 @@ def model_fn(features, labels, mode, params):
     learning_rate = params["learning_rate"]
     l2_reg_lambda = params["l2_reg_lambda"]
     layers = list(map(int, params["deep_layers"].split(',')))
+    cross_layers = params["cross_layers"]
     dropout = list(map(float, params["dropout"].split(',')))
 
     # ---------- initial weights ----------- #
     # [numeric_feature, one-hot categorical_feature]统一做embedding
     coe_b = tf.get_variable(name="coe_b", shape=[1], initializer=tf.constant_initializer(0.0))
-    coe_w = tf.get_variable(name="coe_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
     coe_v = tf.get_variable(name="coe_v", shape=[feature_size, embed_size],
                             initializer=tf.glorot_normal_initializer())
+    cross_b = tf.get_variable(name="cross_b", shape=[cross_layers, field_size*embed_size],
+                              initializer=tf.glorot_uniform_initializer())
+    cross_w = tf.get_variable(name="cross_w", shape=[cross_layers, field_size*embed_size],
+                              initializer=tf.glorot_uniform_initializer())
 
     # ---------- reshape feature ----------- #
     feat_idx = features["feat_idx"]         # 非零特征位置[batch_size, field_size, 1]
@@ -106,47 +111,38 @@ def model_fn(features, labels, mode, params):
     feat_val = features["feat_val"]         # 非零特征的值[batch_size, field_size, 1]
     feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
 
-    # ----- define f(x) ----- #
-    with tf.variable_scope("Embed-layer"):
-        embeddings = tf.nn.embedding_lookup(embed_w, feat_idx)              # [Batch, Field, K]
+    # ------------- define f(x) ------------ #
+    with tf.variable_scope("Embed-Layer"):
+        embeddings = tf.nn.embedding_lookup(coe_v, feat_idx)                # [Batch, Field, K]
         feat_vals = tf.reshape(feat_val, shape=[-1, field_size, 1])         # [Batch, Field, 1]
         embeddings = tf.multiply(embeddings, feat_vals)                     # [Batch, Field, K]
-        x0 = tf.reshape(embeddings, shape=[-1, field_size*embedding_size])  # [Batch, Field*K]
+        x0 = tf.reshape(embeddings, shape=[-1, field_size*embed_size])      # [Batch, Field*K]
 
-    with tf.variable_scope("Cross-layer"):
+    with tf.variable_scope("Cross-Layer"):
         xl = x0
         for l in range(cross_layers):
             wl = tf.reshape(cross_w[l], shape=[-1, 1])      # [Field*K,1]
             xlw = tf.matmul(xl, wl)                         # [Batch, 1]
             xl = x0 * xlw + cross_b[l]                      # [Batch, Field*K]
 
-    with tf.variable_scope("Deep-layer"):
-        if FLAGS.batch_norm:
-            if mode == tf.estimator.ModeKeys.TRAIN:
-                train_phase = True
-            else:
-                train_phase = False
-        else:
-            train_phase = True
-
-        deep_inputs = x0        # [Batch, Field*K]
-        for i in range(len(deep_layers)):
+    with tf.variable_scope("Deep-Layer"):
+        deep_inputs = x0                                    # [Batch, Field*K]
+        # hidden layer
+        for i in range(len(layers)):
             deep_inputs = tf.contrib.layers.fully_connected(
-                inputs=deep_inputs, num_outputs=deep_layers[i], scope='mlp_%d' % i,
-                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg))
-            if FLAGS.batch_norm:
-                # <<https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md>>
-                # Batch normalization after Relu
-                deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' % i)
+                inputs=deep_inputs, num_outputs=layers[i], scope="mlp_%d" % i,
+                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda))
             if mode == tf.estimator.ModeKeys.TRAIN:
                 deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])
 
-    with tf.variable_scope("DCN-out"):
+    with tf.variable_scope("DCN-Out"):
         x_stack = tf.concat([xl, deep_inputs], 1)
-        y_deep = tf.contrib.layers.fully_connected(
+        y_comb = tf.contrib.layers.fully_connected(
             inputs=x_stack, num_outputs=1, activation_fn=tf.identity,
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='comb_layer')
-        y_hat = tf.reshape(y_deep, shape=[-1])                  # [Batch]
+            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg_lambda), scope="comb_layer")
+        y_d = tf.reshape(y_comb, shape=[-1])                    # [Batch]
+        y_bias = coe_b * tf.ones_like(y_d, dtype=tf.float32)
+        y_hat = y_d + y_bias                                    # [Batch]
         y_pred = tf.nn.sigmoid(y_hat)                           # [Batch]
 
     # ----- mode: predict/evaluate/train ----- #
@@ -264,7 +260,7 @@ def _print_init_info(train_files, valid_files, tests_files):
 def main(_):
     print("==================== 1.Check Args and Initialized Distributed Env...")
     if FLAGS.file_name == "":       # 存储算法模型文件名称[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.file_name = "ch06_Wide_Deep_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.file_name = "ch08_Deep_Cross_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.file_name
     if FLAGS.input_dir == "":       # windows环境测试[未指定data目录条件下]
         root_dir = os.path.dirname(os.path.dirname(os.getcwd()))
