@@ -157,13 +157,13 @@ def model_fn(features, labels, mode, params):
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
 
     # Provide an estimator spec for 'ModeKeys.EVAL'
-    if FLAGS.loss == "log_loss":
+    if FLAGS.loss_mode == "log_loss":
         loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) \
-               + l2_reg * tf.nn.l2_loss(embed_w) + l2_reg * tf.nn.l2_loss(cross_b) \
-               + l2_reg * tf.nn.l2_loss(cross_w)
+               + l2_reg_lambda * tf.nn.l2_loss(coe_v) + l2_reg_lambda * tf.nn.l2_loss(cross_b) \
+               + l2_reg_lambda * tf.nn.l2_loss(cross_w)
     else:
-        loss = tf.reduce_mean(tf.square(labels-y_pred)) + l2_reg * tf.nn.l2_loss(embed_w) \
-               + l2_reg * tf.nn.l2_loss(cross_b) + l2_reg * tf.nn.l2_loss(cross_w)
+        loss = tf.reduce_mean(tf.square(labels-y_pred)) + l2_reg_lambda * tf.nn.l2_loss(coe_v) \
+               + l2_reg_lambda * tf.nn.l2_loss(cross_b) + l2_reg_lambda * tf.nn.l2_loss(cross_w)
     eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
     if mode == tf.estimator.ModeKeys.EVAL:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
@@ -251,6 +251,7 @@ def _print_init_info(train_files, valid_files, tests_files):
     print("learning_rate ------ ", FLAGS.learning_rate)
     print("l2_reg_lambda ------ ", FLAGS.l2_reg_lambda)
     print("deep_layers -------- ", FLAGS.deep_layers)
+    print("cross_layers ------- ", FLAGS.cross_layers)
     print("dropout ------------ ", FLAGS.dropout)
     print("train_files: ", train_files)
     print("valid_files: ", valid_files)
@@ -289,6 +290,7 @@ def main(_):
         "learning_rate": FLAGS.learning_rate,
         "l2_reg_lambda": FLAGS.l2_reg_lambda,
         "deep_layers": FLAGS.deep_layers,
+        "cross_layers": FLAGS.cross_layers,
         "dropout": FLAGS.dropout
     }
     session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_thread})
