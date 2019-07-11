@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-<<DeepFM: A Factorization-Machine based Neural Network for CTR Prediction.>>
-Implementation of DeepFM model with the following features：
+<<NFM: Neural Factorization Machines for Sparse Predictive Analytics.>>
+Implementation of NFM model with the following features：
 #1 Input pipeline using Dataset API, Support parallel and prefetch
 #2 Train pipeline using Custom Estimator by rewriting model_fn
 #3 Support distributed training by TF_CONFIG
@@ -19,7 +19,7 @@ import shutil
 import tensorflow as tf
 from datetime import date, timedelta
 
-# =================== CMD Arguments for DeepFM model =================== #
+# =================== CMD Arguments for NFM model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
@@ -253,7 +253,7 @@ def _print_init_info(train_files, valid_files, tests_files):
 def main(_):
     print("==================== 1.Check Args and Initialized Distributed Env...")
     if FLAGS.file_name == "":       # 存储算法模型文件名称[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.file_name = "ch07_DeepFM_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
+        FLAGS.file_name = "ch09_NFM_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
     FLAGS.model_dir = FLAGS.model_dir + FLAGS.file_name
     if FLAGS.input_dir == "":       # windows环境测试[未指定data目录条件下]
         root_dir = os.path.dirname(os.path.dirname(os.getcwd()))
@@ -274,7 +274,7 @@ def main(_):
             print("Existed model cleared at %s folder" % FLAGS.model_dir)
     distributed_env_set()       # 分布式环境设置
 
-    print("==================== 2.Set model params and Build Wide&Deep model...")
+    print("==================== 2.Set model params and Build NFM model...")
     model_params = {
         "feature_size": FLAGS.feature_size,
         "field_size": FLAGS.field_size,
@@ -288,10 +288,10 @@ def main(_):
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-    dfm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
+    nfm = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
                                  params=model_params, config=config)
 
-    print("==================== 3.Apply DeepFM model to diff tasks...")
+    print("==================== 3.Apply NFM model to diff tasks...")
     train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
     if FLAGS.task_mode == "train":
         train_spec = tf.estimator.TrainSpec(
@@ -300,11 +300,11 @@ def main(_):
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
             steps=None, start_delay_secs=500, throttle_secs=600)
-        tf.estimator.train_and_evaluate(dfm, train_spec, eval_spec)
+        tf.estimator.train_and_evaluate(nfm, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
-        dfm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        nfm.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
     elif FLAGS.task_mode == "infer":
-        preds = dfm.predict(
+        preds = nfm.predict(
             input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
             predict_keys="prob")
         with open(FLAGS.input_dir+"/tests_pred.txt", "w") as fo:
@@ -315,7 +315,7 @@ def main(_):
             "feat_idx": tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name="feat_idx"),
             "feat_val": tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name="feat_val")}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        dfm.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
+        nfm.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
