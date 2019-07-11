@@ -117,10 +117,10 @@ def model_fn(features, labels, mode, params):
         embeddings = tf.multiply(embeddings, feat_vals)                 # [Batch, Field, K]
         sum_square = tf.square(tf.reduce_sum(embeddings, 1))            # [Batch, K]
         square_sum = tf.reduce_sum(tf.square(embeddings), 1)            # [Batch, K]
-        y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum), 1)     # [Batch]
+        bi_out = 0.5*(tf.subtract(sum_square, square_sum))              # [Batch, K]
 
     with tf.variable_scope("Deep-Layer"):
-        deep_inputs = tf.reshape(embeddings, shape=[-1, field_size * embed_size])
+        deep_inputs = bi_out
         # hidden layer
         for i in range(len(layers)):
             deep_inputs = tf.contrib.layers.fully_connected(
@@ -137,7 +137,7 @@ def model_fn(features, labels, mode, params):
     with tf.variable_scope("DeepFM-Out"):
         y_deep = tf.reshape(y_d, shape=[-1])
         y_bias = coe_b * tf.ones_like(y_w, dtype=tf.float32)    # [Batch]
-        y_hat = y_bias + y_w + y_v + y_deep                     # [Batch]
+        y_hat = y_bias + y_w + y_deep                           # [Batch]
         y_pred = tf.nn.sigmoid(y_hat)                           # [Batch]
 
     # ----- mode: predict/evaluate/train ----- #
