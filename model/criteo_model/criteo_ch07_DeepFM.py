@@ -274,7 +274,7 @@ def main(_):
             print("Existed model cleared at %s folder" % FLAGS.model_dir)
     distributed_env_set()       # 分布式环境设置
 
-    print("==================== 2.Set model params and Build Wide&Deep model...")
+    print("==================== 2.Set model params and Build DeepFM model...")
     model_params = {
         "feature_size": FLAGS.feature_size,
         "field_size": FLAGS.field_size,
