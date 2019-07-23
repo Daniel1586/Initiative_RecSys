@@ -1,4 +1,4 @@
-# Initiative_Recommender_System
+# Initiative_RecSys
 **GitHub** 地址：https://github.com/Daniel1586/Initiative_recommender_system
 
 # RoadMap
