@@ -2,13 +2,12 @@
 # -*- coding: utf-8 -*-
 
 """
-<<LR: Predicting Clicks - Estimating the Click-Through Rate for New Ads.>>
-Implementation of LR model with the following features：
+Implementation of CTR model with the following features：
 #1 Input pipeline using Dataset API, Support parallel and prefetch.
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
 #4 Support export_model for TensorFlow Serving.
-########## TF Version: 1.8.0/Python Version: 3.6 ##########
+############### TF Version: 1.8.0/Python Version: 3.6 ###############
 """
 
 import os
@@ -18,23 +17,27 @@ import random
 import shutil
 import tensorflow as tf
 from datetime import date, timedelta
+from ctr_model import model_lr
 
-# =================== CMD Arguments for LR model =================== #
+# =================== CMD Arguments for CTR model =================== #
 flags = tf.app.flags
 flags.DEFINE_integer("run_mode", 0, "{0-local, 1-single_distributed, 2-multi_distributed}")
 flags.DEFINE_string("ps_hosts", None, "Comma-separated list of hostname:port pairs")
-flags.DEFINE_string("worker_hosts", None, "Comma-separated list of hostname:port pairs")
+flags.DEFINE_string("wk_hosts", None, "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("job_name", None, "Job name: ps or worker")
-flags.DEFINE_integer("task_index", None, "Index of task within the job")
+flags.DEFINE_integer("task_id", None, "Index of task within the job")
 flags.DEFINE_integer("num_thread", 4, "Number of threads")
+# global parameters--全局参数设置
+flags.DEFINE_string("algorithm", "LR", "{LR, ., ., .}")
+flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
-flags.DEFINE_string("file_name", "", "File for save model")
-flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
-flags.DEFINE_boolean("clr_mode", True, "Clear existed model or not")
+flags.DEFINE_string("clear_mod", "True", "{True, False},Clear existed model or not")
+flags.DEFINE_integer("samples_size", 179968, "Number of train samples")
 flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
+# model parameters--模型参数设置
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 128, "Number of batch size")
 flags.DEFINE_integer("log_steps", 1406, "Save summary every steps")
@@ -79,141 +82,53 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
     return batch_features, batch_labels
 
 
-def model_fn(features, labels, mode, params):
-
-    # ---------- hyper-parameters ---------- #
-    feature_size = params["feature_size"]
-    field_size = params["field_size"]
-    learning_rate = params["learning_rate"]
-    l2_reg_lambda = params["l2_reg_lambda"]
-
-    # ---------- initial weights ----------- #
-    # [numeric_feature, one-hot categorical_feature]
-    coe_b = tf.get_variable(name="coe_b", shape=[1], initializer=tf.constant_initializer(0.0))
-    coe_w = tf.get_variable(name="coe_w", shape=[feature_size], initializer=tf.glorot_normal_initializer())
-
-    # ---------- reshape feature ----------- #
-    feat_idx = features["feat_idx"]         # 非零特征位置[batch_size, field_size, 1]
-    feat_idx = tf.reshape(feat_idx, shape=[-1, field_size])     # [Batch, Field]
-    feat_val = features["feat_val"]         # 非零特征的值[batch_size, field_size, 1]
-    feat_val = tf.reshape(feat_val, shape=[-1, field_size])     # [Batch, Field]
-
-    # ------------- define f(x) ------------ #
-    # LR: y = b + sum<wi,xi>
-    with tf.variable_scope("First-Order"):
-        feat_wgt = tf.nn.embedding_lookup(coe_w, feat_idx)              # [Batch, Field]
-        y_w = tf.reduce_sum(tf.multiply(feat_wgt, feat_val), 1)         # [Batch]
-
-    with tf.variable_scope("LR-Out"):
-        y_b = coe_b * tf.ones_like(y_w, dtype=tf.float32)               # [Batch]
-        y_hat = y_b + y_w                                               # [Batch]
-        y_pred = tf.nn.sigmoid(y_hat)                                   # [Batch]
-
-    # ----- mode: predict/evaluate/train ----- #
-    # predict: 不计算loss/metric; evaluate: 不进行梯度下降和参数更新
-
-    # Provide an estimator spec for 'ModeKeys.PREDICT'
-    predictions = {"prob": y_pred}
-    export_outputs = {
-        tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:
-            tf.estimator.export.PredictOutput(predictions)}
-    if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
-
-    # Provide an estimator spec for 'ModeKeys.EVAL'
-    if FLAGS.loss_mode == "log_loss":
-        loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=y_hat)) +\
-               l2_reg_lambda * tf.nn.l2_loss(coe_w)
-    else:
-        loss = tf.reduce_mean(tf.square(labels-y_pred))
-    eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
-    if mode == tf.estimator.ModeKeys.EVAL:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
-                                          eval_metric_ops=eval_metric_ops)
-
-    # Provide an estimator spec for 'ModeKeys.TRAIN'
-    if FLAGS.optimizer == "Adam":
-        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-8)
-    elif FLAGS.optimizer == "Adagrad":
-        optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate, initial_accumulator_value=1e-8)
-    elif FLAGS.optimizer == "Momentum":
-        optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.95)
-    elif FLAGS.optimizer == "Ftrl":
-        optimizer = tf.train.FtrlOptimizer(learning_rate)
-    else:
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
-    train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
-
-    if mode == tf.estimator.ModeKeys.TRAIN:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
-
-
 # Initialized Distributed Environment,初始化分布式环境
-def distributed_env_set():
+def distr_env_set():
     if FLAGS.run_mode == 1:         # 单机分布式
         ps_hosts = FLAGS.ps_hosts.split(',')
-        chief_hosts = FLAGS.worker_hosts.split(',')
+        cf_hosts = FLAGS.wk_hosts.split(',')
         job_name = FLAGS.job_name
-        task_index = FLAGS.task_index
-        print('ps_host --------', ps_hosts)
-        print('chief_hosts ----', chief_hosts)
-        print('job_name -------', job_name)
-        print('task_index -----', str(task_index))
+        task_idx = FLAGS.task_id
+        print("ps_host --------", ps_hosts)
+        print("chief_hosts ----", cf_hosts)
+        print("job_name -------", job_name)
+        print("task_index -----", str(task_idx))
         # 无worker参数
         tf_config = {
-            'cluster': {'chief': chief_hosts, 'ps': ps_hosts},
-            'task': {'type': job_name, 'index': task_index}
+            "cluster": {"chief": cf_hosts, "ps": ps_hosts},
+            "task": {"type": job_name, "index": task_idx}
         }
         print(json.dumps(tf_config))
-        os.environ['TF_CONFIG'] = json.dumps(tf_config)
+        os.environ["TF_CONFIG"] = json.dumps(tf_config)
     elif FLAGS.run_mode == 2:      # 集群分布式
         ps_hosts = FLAGS.ps_hosts.split(',')
-        worker_hosts = FLAGS.worker_hosts.split(',')
-        chief_hosts = worker_hosts[0:1]     # get first worker as chief
-        worker_hosts = worker_hosts[1:]     # the rest as worker
-        task_index = FLAGS.task_index
+        worker_hosts = FLAGS.wk_hosts.split(',')
+        cf_hosts = worker_hosts[0:1]    # get first worker as chief
+        wk_hosts = worker_hosts[1:]     # the rest as worker
+        task_idx = FLAGS.task_id
         job_name = FLAGS.job_name
-        print('ps_host ------', ps_hosts)
-        print('worker_host --', worker_hosts)
-        print('chief_hosts --', chief_hosts)
-        print('job_name -----', job_name)
-        print('task_index ---', str(task_index))
+        print("ps_host --------", ps_hosts)
+        print("chief_hosts ----", cf_hosts)
+        print("worker_host ----", wk_hosts)
+        print("job_name -------", job_name)
+        print("task_index -----", str(task_idx))
         # use #worker=0 as chief
-        if job_name == "worker" and task_index == 0:
+        if job_name == "worker" and task_idx == 0:
             job_name = "chief"
         # use #worker=1 as evaluator
-        if job_name == "worker" and task_index == 1:
-            job_name = 'evaluator'
-            task_index = 0
+        if job_name == "worker" and task_idx == 1:
+            job_name = "evaluator"
+            task_idx = 0
         # the others as worker
-        if job_name == "worker" and task_index > 1:
-            task_index -= 2
+        if job_name == "worker" and task_idx > 1:
+            task_idx -= 2
 
         tf_config = {
-            'cluster': {'chief': chief_hosts, 'worker': worker_hosts, 'ps': ps_hosts},
-            'task': {'type': job_name, 'index': task_index}
+            "cluster": {"chief": cf_hosts, "worker": wk_hosts, "ps": ps_hosts},
+            "task": {"type": job_name, "index": task_idx}
         }
         print(json.dumps(tf_config))
-        os.environ['TF_CONFIG'] = json.dumps(tf_config)
-
-
-# print initial information of paras,打印初始化参数信息
-def _print_init_info(train_files, valid_files, tests_files):
-    print("input_dir ---------- ", FLAGS.input_dir)
-    print("model_dir ---------- ", FLAGS.model_dir)
-    print("file_name ---------- ", FLAGS.file_name)
-    print("task_mode ---------- ", FLAGS.task_mode)
-    print("feature_size ------- ", FLAGS.feature_size)
-    print("field_size --------- ", FLAGS.field_size)
-    print("num_epochs --------- ", FLAGS.num_epochs)
-    print("batch_size --------- ", FLAGS.batch_size)
-    print("loss_mode ---------- ", FLAGS.loss_mode)
-    print("optimizer ---------- ", FLAGS.optimizer)
-    print("learning_rate ------ ", FLAGS.learning_rate)
-    print("l2_reg_lambda ------ ", FLAGS.l2_reg_lambda)
-    print("train_files: ", train_files)
-    print("valid_files: ", valid_files)
-    print("tests_files: ", tests_files)
+        os.environ["TF_CONFIG"] = json.dumps(tf_config)
 
 
 def main(_):
@@ -229,7 +144,6 @@ def main(_):
     random.shuffle(train_files)                                     # 打散train文件
     valid_files = glob.glob("%s/valid*set" % FLAGS.input_dir)       # 获取指定目录下valid文件
     tests_files = glob.glob("%s/tests*set" % FLAGS.input_dir)       # 获取指定目录下tests文件
-    _print_init_info(train_files, valid_files, tests_files)
 
     if FLAGS.clr_mode and FLAGS.task_mode == "train":               # 删除已存在的模型文件
         try:
@@ -251,7 +165,7 @@ def main(_):
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-    lr = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
+    lr = tf.estimator.Estimator(model_fn=model_lr, model_dir=FLAGS.model_dir,
                                 params=model_params, config=config)
 
     print("==================== 3.Apply LR model to diff tasks...")
