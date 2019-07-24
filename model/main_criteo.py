@@ -133,57 +133,63 @@ def distr_env_set():
 
 def main(_):
     print("==================== 1.Check Args and Initialized Distributed Env...")
-    if FLAGS.file_name == "":       # 存储算法模型文件名称[标记不同时刻训练模型,程序执行日期前一天:20190327]
-        FLAGS.file_name = "ch01_LR_" + (date.today() + timedelta(-1)).strftime('%Y%m%d')
-    FLAGS.model_dir = FLAGS.model_dir + FLAGS.file_name
-    if FLAGS.input_dir == "":       # windows环境测试[未指定data目录条件下]
-        root_dir = os.path.dirname(os.path.dirname(os.getcwd()))
-        FLAGS.input_dir = root_dir + "\\data" + "\\criteo_data_set\\"
+    if FLAGS.model_dir == "":       # 算法模型checkpoint文件
+        FLAGS.model_dir = (date.today() + timedelta(-1)).strftime("%Y%m%d") + "_Ckt_LR"
+    if FLAGS.serve_dir == "":       # 算法模型输出pb文件
+        FLAGS.serve_dir = (date.today() + timedelta(-1)).strftime("%Y%m%d") + "_Exp_LR"
+    if FLAGS.input_dir == "":       # windows环境测试
+        FLAGS.input_dir = os.path.dirname(os.getcwd()) + "\\data" + "\\data_set_criteo\\"
 
     train_files = glob.glob("%s/train*set" % FLAGS.input_dir)       # 获取指定目录下train文件
-    random.shuffle(train_files)                                     # 打散train文件
     valid_files = glob.glob("%s/valid*set" % FLAGS.input_dir)       # 获取指定目录下valid文件
     tests_files = glob.glob("%s/tests*set" % FLAGS.input_dir)       # 获取指定目录下tests文件
+    random.shuffle(train_files)                                     # 打散train文件
 
-    if FLAGS.clr_mode and FLAGS.task_mode == "train":               # 删除已存在的模型文件
+    if FLAGS.clear_mod == "True" and FLAGS.task_mode == "train":    # 删除已存在的模型文件
         try:
             shutil.rmtree(FLAGS.model_dir)      # 递归删除目录下的目录及文件
         except Exception as e:
             print(e, "At clear_existed_model")
         else:
             print("Existed model cleared at %s folder" % FLAGS.model_dir)
-    distributed_env_set()       # 分布式环境设置
+    distr_env_set()       # 分布式环境设置
 
-    print("==================== 2.Set model params and Build LR model...")
+    print("==================== 2.Set model params and Build CTR model...")
+    if FLAGS.algorithm == "LR":
+        model_fn = model_lr
+    else:
+        model_fn = None
+        print("Invalid algorithm, not supported!")
     model_params = {
         "feature_size": FLAGS.feature_size,
         "field_size": FLAGS.field_size,
+        "loss_mode": FLAGS.loss_mode,
+        "optimizer": FLAGS.optimizer,
         "learning_rate": FLAGS.learning_rate,
         "l2_reg_lambda": FLAGS.l2_reg_lambda
     }
-    session_config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': FLAGS.num_thread})
+    session_config = tf.ConfigProto(device_count={"GPU": 1, "CPU": FLAGS.num_thread})
     config = tf.estimator.RunConfig().replace(session_config=session_config,
                                               save_summary_steps=FLAGS.log_steps,
                                               log_step_count_steps=FLAGS.log_steps)
-    lr = tf.estimator.Estimator(model_fn=model_lr, model_dir=FLAGS.model_dir,
-                                params=model_params, config=config)
+    ctr = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
+                                 params=model_params, config=config)
 
-    print("==================== 3.Apply LR model to diff tasks...")
-    train_step = 179968*FLAGS.num_epochs/FLAGS.batch_size       # data_num * num_epochs / batch_size
+    print("==================== 3.Apply CTR model to diff tasks...")
+    train_step = FLAGS.samples_size*FLAGS.num_epochs/FLAGS.batch_size   # data_num * num_epochs / batch_size
     if FLAGS.task_mode == "train":
         train_spec = tf.estimator.TrainSpec(
-            input_fn=lambda: input_fn(train_files, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs),
+            input_fn=lambda: input_fn(train_files, FLAGS.batch_size, FLAGS.num_epochs, True),
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
-            input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1),
-            steps=None, start_delay_secs=500, throttle_secs=600)
-        tf.estimator.train_and_evaluate(lr, train_spec, eval_spec)
+            input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False), steps=None,
+            start_delay_secs=500, throttle_secs=600)
+        tf.estimator.train_and_evaluate(ctr, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
-        lr.evaluate(input_fn=lambda: input_fn(valid_files, batch_size=FLAGS.batch_size, num_epochs=1))
+        ctr.evaluate(input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False))
     elif FLAGS.task_mode == "infer":
-        preds = lr.predict(
-            input_fn=lambda: input_fn(tests_files, batch_size=FLAGS.batch_size, num_epochs=1),
-            predict_keys="prob")
+        preds = ctr.predict(
+            input_fn=lambda: input_fn(tests_files, FLAGS.batch_size, 1, False), predict_keys="prob")
         with open(FLAGS.input_dir+"/tests_pred.txt", "w") as fo:
             for prob in preds:
                 fo.write("%f\n" % (prob['prob']))
@@ -192,7 +198,7 @@ def main(_):
             "feat_idx": tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name="feat_idx"),
             "feat_val": tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name="feat_val")}
         serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
-        lr.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
+        ctr.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
