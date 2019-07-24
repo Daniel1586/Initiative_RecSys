@@ -39,8 +39,7 @@ flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot
 flags.DEFINE_integer("field_size", 39, "Number of fields")
 # model parameters--模型参数设置
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
-flags.DEFINE_integer("batch_size", 128, "Number of batch size")
-flags.DEFINE_integer("log_steps", 1406, "Save summary every steps")
+flags.DEFINE_integer("batch_size", 256, "Number of batch size")
 flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
@@ -67,11 +66,11 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
 
     # extract lines from input files[filename or filename list] using the Dataset API,
     # multi-thread pre-process then prefetch some certain amount of data[6400]
-    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(6400)
+    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(9600)
 
     # randomize the input data with a window of 512 elements (read into memory)
     if perform_shuffle:
-        dataset = dataset.shuffle(buffer_size=512)
+        dataset = dataset.shuffle(buffer_size=1024)
 
     # epochs from blending together
     dataset = dataset.batch(batch_size)
@@ -168,22 +167,23 @@ def main(_):
         "learning_rate": FLAGS.learning_rate,
         "l2_reg_lambda": FLAGS.l2_reg_lambda
     }
+    batch_num = int(FLAGS.samples_size/FLAGS.batch_size)
     session_config = tf.ConfigProto(device_count={"GPU": 1, "CPU": FLAGS.num_thread})
     config = tf.estimator.RunConfig().replace(session_config=session_config,
-                                              save_summary_steps=FLAGS.log_steps,
-                                              log_step_count_steps=FLAGS.log_steps)
+                                              save_summary_steps=batch_num,
+                                              log_step_count_steps=batch_num)
     ctr = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
                                  params=model_params, config=config)
 
     print("==================== 3.Apply CTR model to diff tasks...")
-    train_step = FLAGS.samples_size*FLAGS.num_epochs/FLAGS.batch_size   # data_num * num_epochs / batch_size
+    train_step = batch_num*FLAGS.num_epochs     # data_num * num_epochs / batch_size
     if FLAGS.task_mode == "train":
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn(train_files, FLAGS.batch_size, FLAGS.num_epochs, True),
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False), steps=None,
-            start_delay_secs=500, throttle_secs=600)
+            start_delay_secs=20, throttle_secs=30)
         tf.estimator.train_and_evaluate(ctr, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
         ctr.evaluate(input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False))
