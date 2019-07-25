@@ -168,22 +168,23 @@ def main(_):
         "l2_reg_lambda": FLAGS.l2_reg_lambda
     }
     batch_num = int(FLAGS.samples_size/FLAGS.batch_size)
+    train_step = batch_num * FLAGS.num_epochs       # data_num * num_epochs / batch_size
     session_config = tf.ConfigProto(device_count={"GPU": 1, "CPU": FLAGS.num_thread})
-    config = tf.estimator.RunConfig().replace(session_config=session_config,
-                                              save_summary_steps=batch_num,
-                                              log_step_count_steps=batch_num)
+    config = tf.estimator.RunConfig(session_config=session_config,
+                                    save_checkpoints_steps=batch_num*2,
+                                    save_summary_steps=batch_num,
+                                    log_step_count_steps=batch_num)
     ctr = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
                                  params=model_params, config=config)
 
     print("==================== 3.Apply CTR model to diff tasks...")
-    train_step = batch_num*FLAGS.num_epochs     # data_num * num_epochs / batch_size
     if FLAGS.task_mode == "train":
         train_spec = tf.estimator.TrainSpec(
             input_fn=lambda: input_fn(train_files, FLAGS.batch_size, FLAGS.num_epochs, True),
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False), steps=None,
-            start_delay_secs=20, throttle_secs=30)
+            start_delay_secs=50, throttle_secs=60)
         tf.estimator.train_and_evaluate(ctr, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
         ctr.evaluate(input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False))
