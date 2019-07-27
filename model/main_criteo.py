@@ -38,7 +38,7 @@ flags.DEFINE_integer("samples_size", 179968, "Number of train samples")
 flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
 # model parameters--模型参数设置
-flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
+flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
 flags.DEFINE_integer("batch_size", 256, "Number of batch size")
 flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
@@ -172,8 +172,8 @@ def main(_):
     session_config = tf.ConfigProto(device_count={"GPU": 1, "CPU": FLAGS.num_thread})
     config = tf.estimator.RunConfig(session_config=session_config,
                                     save_checkpoints_steps=batch_num*2,
-                                    save_summary_steps=batch_num,
-                                    log_step_count_steps=batch_num)
+                                    save_summary_steps=batch_num*2,
+                                    log_step_count_steps=batch_num*2)
     ctr = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
                                  params=model_params, config=config)
 
@@ -184,7 +184,7 @@ def main(_):
             max_steps=train_step)
         eval_spec = tf.estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False), steps=None,
-            start_delay_secs=50, throttle_secs=60)
+            start_delay_secs=30, throttle_secs=20)
         tf.estimator.train_and_evaluate(ctr, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
         ctr.evaluate(input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False))
