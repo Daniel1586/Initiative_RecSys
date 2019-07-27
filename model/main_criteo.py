@@ -7,7 +7,7 @@ Implementation of CTR model with the following features：
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
 #4 Support export_model for TensorFlow Serving.
-############### TF Version: 1.8.0/Python Version: 3.6 ###############
+############### TF Version: 1.13.1/Python Version: 3.7 ###############
 """
 
 import os
@@ -17,6 +17,7 @@ import random
 import shutil
 import tensorflow as tf
 from datetime import date, timedelta
+from tensorflow_estimator import estimator
 from ctr_model import model_lr
 
 # =================== CMD Arguments for CTR model =================== #
@@ -37,6 +38,7 @@ flags.DEFINE_string("clear_mod", "True", "{True, False},Clear existed model or n
 flags.DEFINE_integer("samples_size", 179968, "Number of train samples")
 flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
+flags.DEFINE_integer("log_steps", 1000, "Save summary every steps")
 # model parameters--模型参数设置
 flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
 flags.DEFINE_integer("batch_size", 256, "Number of batch size")
@@ -170,22 +172,22 @@ def main(_):
     batch_num = int(FLAGS.samples_size/FLAGS.batch_size)
     train_step = batch_num * FLAGS.num_epochs       # data_num * num_epochs / batch_size
     session_config = tf.ConfigProto(device_count={"GPU": 1, "CPU": FLAGS.num_thread})
-    config = tf.estimator.RunConfig(session_config=session_config,
-                                    save_checkpoints_steps=batch_num*2,
-                                    save_summary_steps=batch_num*2,
-                                    log_step_count_steps=batch_num*2)
-    ctr = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
-                                 params=model_params, config=config)
+    config = estimator.RunConfig(session_config=session_config,
+                                 save_checkpoints_steps=batch_num*2,
+                                 save_summary_steps=FLAGS.log_steps,
+                                 log_step_count_steps=FLAGS.log_steps)
+    ctr = estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
+                              params=model_params, config=config)
 
     print("==================== 3.Apply CTR model to diff tasks...")
     if FLAGS.task_mode == "train":
-        train_spec = tf.estimator.TrainSpec(
+        train_spec = estimator.TrainSpec(
             input_fn=lambda: input_fn(train_files, FLAGS.batch_size, FLAGS.num_epochs, True),
             max_steps=train_step)
-        eval_spec = tf.estimator.EvalSpec(
+        eval_spec = estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False), steps=None,
             start_delay_secs=30, throttle_secs=20)
-        tf.estimator.train_and_evaluate(ctr, train_spec, eval_spec)
+        estimator.train_and_evaluate(ctr, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
         ctr.evaluate(input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False))
     elif FLAGS.task_mode == "infer":
@@ -198,7 +200,7 @@ def main(_):
         feature_spec = {
             "feat_idx": tf.placeholder(dtype=tf.int64, shape=[None, FLAGS.field_size], name="feat_idx"),
             "feat_val": tf.placeholder(dtype=tf.float32, shape=[None, FLAGS.field_size], name="feat_val")}
-        serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
+        serving_input_receiver_fn = estimator.export.build_raw_serving_input_receiver_fn(feature_spec)
         ctr.export_savedmodel(FLAGS.serve_dir, serving_input_receiver_fn)
 
 
