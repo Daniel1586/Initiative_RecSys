@@ -5,7 +5,7 @@ import tensorflow as tf
 
 
 # LR: Predicting Clicks - Estimating the Click-Through Rate for New Ads.
-def model_lr(features, labels, mode, params):
+def lr(features, labels, mode, params):
 
     # --------------- hyper-parameters --------------- #
     feature_size = params["feature_size"]
@@ -76,7 +76,9 @@ def model_lr(features, labels, mode, params):
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
 
 
-def model_fm(features, labels, mode, params):
+# FM: Factorization Machines./Factorization Machines with libFM.
+# Fast Context-aware Recommendations with Factorization Machines.
+def fm(features, labels, mode, params):
 
     # --------------- hyper-parameters --------------- #
     feature_size = params["feature_size"]
