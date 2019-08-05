@@ -29,18 +29,19 @@ flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_id", None, "Index of task within the job")
 flags.DEFINE_integer("num_thread", 4, "Number of threads")
 # global parameters--全局参数设置
-flags.DEFINE_string("algorithm", "LR", "{LR, ., ., .}")
+flags.DEFINE_string("algorithm", "FM", "{LR, FM, ., .}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_string("clear_mod", "True", "{True, False},Clear existed model or not")
+flags.DEFINE_integer("log_steps", 1000, "Save summary every steps")
+# model parameters--模型参数设置
 flags.DEFINE_integer("samples_size", 179968, "Number of train samples")
 flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("log_steps", 1000, "Save summary every steps")
-# model parameters--模型参数设置
-flags.DEFINE_integer("num_epochs", 30, "Number of epochs")
+flags.DEFINE_integer("embed_size", 10, "Embedding size[length of hidden vector of xi/xj]")
+flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
 flags.DEFINE_integer("batch_size", 256, "Number of batch size")
 flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
@@ -135,9 +136,9 @@ def distr_env_set():
 def main(_):
     print("==================== 1.Check Args and Initialized Distributed Env...")
     if FLAGS.model_dir == "":       # 算法模型checkpoint文件
-        FLAGS.model_dir = (date.today() + timedelta(-1)).strftime("%Y%m%d") + "_Ckt_LR"
+        FLAGS.model_dir = (date.today() + timedelta(-1)).strftime("%Y%m%d") + "_Ckt_" + FLAGS.algorithm
     if FLAGS.serve_dir == "":       # 算法模型输出pb文件
-        FLAGS.serve_dir = (date.today() + timedelta(-1)).strftime("%Y%m%d") + "_Exp_LR"
+        FLAGS.serve_dir = (date.today() + timedelta(-1)).strftime("%Y%m%d") + "_Exp_" + FLAGS.algorithm
     if FLAGS.input_dir == "":       # windows环境测试
         FLAGS.input_dir = os.path.dirname(os.getcwd()) + "\\data" + "\\data_set_criteo\\"
 
@@ -159,6 +160,7 @@ def main(_):
     model_params = {
         "feature_size": FLAGS.feature_size,
         "field_size": FLAGS.field_size,
+        "embed_size": FLAGS.embed_size,
         "loss_mode": FLAGS.loss_mode,
         "optimizer": FLAGS.optimizer,
         "learning_rate": FLAGS.learning_rate,
@@ -166,6 +168,8 @@ def main(_):
     }
     if FLAGS.algorithm == "LR":
         model_fn = lr
+    elif FLAGS.algorithm == "FM":
+        model_fn = fm
     else:
         model_fn = None
         print("Invalid algorithm, not supported!")
