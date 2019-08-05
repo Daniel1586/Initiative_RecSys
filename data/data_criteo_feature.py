@@ -4,14 +4,16 @@
 """
 Preprocess Criteo dataset. This dataset was used for the Display Advertising
 Challenge (https://www.kaggle.com/c/criteo-display-ad-challenge).
-----数据解压: train.csv=45840617条样本, test.csv=6042135条样本
-----这里train只取200000条数据, test只取40000条数据测试
+----数据解压: train.csv=45840617条样本[has label], test.csv=6042135条样本[no label]
+----从train.txt取最后330000条数据,最后30000条数据为测试集;
+----前面300000条数据按9:1比例随机选取为训练集/验证集;
+----从test.txt取开始30000条数据为infer样本集;
 ----[numeric + one-hot categorical_feature]
 This code is referenced from PaddlePaddle models.
 (https://github.com/PaddlePaddle/models/blob/develop/legacy/deep_fm/preprocess.py)
 --For numeric features, clipped and normalized.
 --For categorical features, removed long-tailed data appearing less than 200 times.
-########## TF Version: 1.8.0/Python Version: 3.6 ##########
+############### TF Version: 1.13.1/Python Version: 3.7 ###############
 """
 
 import os
@@ -159,6 +161,26 @@ def preprocess(datain_dir, dataou_dir):
                         out_valid.write("{0} {1}\n".format(label, ' '.join(feat_val)))
 
     with open(dataou_dir + "tests.set", 'w') as out_test:
+        with open(datain_dir + "train_test.txt", 'r') as f:
+            for line in f:
+                features = line.rstrip('\n').split('\t')
+
+                feat_val = []
+                # numeric features normalized to [0,1]
+                for i in range(0, len(numeric_features)):
+                    val = n_feat.gen(i, features[numeric_features[i]])
+                    feat_val.append(str(numeric_features[i]) + ':' + "{0:.6f}".format(val).rstrip('0').rstrip('.'))
+
+                # categorical features one-hot embedding
+                for i in range(0, len(categorical_features)):
+                    val = c_feat.gen(i, features[categorical_features[i]]) + c_feat_offset[i] + 1
+                    feat_val.append(str(val) + ':1')
+
+                label = features[0]
+                out_test.write("{0} {1}\n".format(label, ' '.join(feat_val)))
+
+    print("========== 4.Generate infer dataset ...")
+    with open(dataou_dir + "infer.set", 'w') as out_infer:
         with open(datain_dir + "test.txt", 'r') as f:
             for line in f:
                 features = line.rstrip('\n').split('\t')
@@ -172,8 +194,8 @@ def preprocess(datain_dir, dataou_dir):
                     val = c_feat.gen(i, features[categorical_features[i] - 1]) + c_feat_offset[i] + 1
                     feat_val.append(str(val) + ':1')
 
-                label = 0   # test fake label
-                out_test.write("{0} {1}\n".format(label, ' '.join(feat_val)))
+                label = 0       # test fake label
+                out_infer.write("{0} {1}\n".format(label, ' '.join(feat_val)))
 
 
 if __name__ == "__main__":
