@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import tensorflow as tf
+from tensorflow_estimator import estimator
 
 
 # LR: Predicting Clicks - Estimating the Click-Through Rate for New Ads.
@@ -44,9 +45,9 @@ def lr(features, labels, mode, params):
     predictions = {"prob": y_pred}
     export_outputs = {
         tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:
-            tf.estimator.export.PredictOutput(predictions)}
-    if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
+            estimator.export.PredictOutput(predictions)}
+    if mode == estimator.ModeKeys.PREDICT:
+        return estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
 
     # Provide an estimator spec for 'ModeKeys.EVAL'
     if loss_mode == "log_loss":
@@ -54,10 +55,12 @@ def lr(features, labels, mode, params):
                l2_reg_lambda * tf.nn.l2_loss(coe_w)
     else:
         loss = tf.reduce_mean(tf.square(labels-y_pred))
-    eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
-    if mode == tf.estimator.ModeKeys.EVAL:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
-                                          eval_metric_ops=eval_metric_ops)
+    eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred),
+                       "precision": tf.metrics.precision(labels, y_pred),
+                       "recall": tf.metrics.recall(labels, y_pred)}
+    if mode == estimator.ModeKeys.EVAL:
+        return estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
+                                       eval_metric_ops=eval_metric_ops)
 
     # Provide an estimator spec for 'ModeKeys.TRAIN'
     if optimizer == "Adam":
@@ -72,8 +75,8 @@ def lr(features, labels, mode, params):
         opt_mode = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
     train_op = opt_mode.minimize(loss, global_step=tf.train.get_global_step())
 
-    if mode == tf.estimator.ModeKeys.TRAIN:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
+    if mode == estimator.ModeKeys.TRAIN:
+        return estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
 
 
 # FM: Factorization Machines./Factorization Machines with libFM.
@@ -117,9 +120,9 @@ def fm(features, labels, mode, params):
     predictions = {"prob": y_pred}
     export_outputs = {
         tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:
-            tf.estimator.export.PredictOutput(predictions)}
-    if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
+            estimator.export.PredictOutput(predictions)}
+    if mode == estimator.ModeKeys.PREDICT:
+        return estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
 
     # Provide an estimator spec for 'ModeKeys.EVAL'
     if loss_mode == "log_loss":
@@ -127,10 +130,12 @@ def fm(features, labels, mode, params):
                l2_reg_lambda * tf.nn.l2_loss(coe_w)
     else:
         loss = tf.reduce_mean(tf.square(labels-y_pred))
-    eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
-    if mode == tf.estimator.ModeKeys.EVAL:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
-                                          eval_metric_ops=eval_metric_ops)
+    eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred),
+                       "precision": tf.metrics.precision(labels, y_pred),
+                       "recall": tf.metrics.recall(labels, y_pred)}
+    if mode == estimator.ModeKeys.EVAL:
+        return estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
+                                       eval_metric_ops=eval_metric_ops)
 
     # Provide an estimator spec for 'ModeKeys.TRAIN'
     if optimizer == "Adam":
@@ -145,5 +150,5 @@ def fm(features, labels, mode, params):
         opt_mode = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
     train_op = opt_mode.minimize(loss, global_step=tf.train.get_global_step())
 
-    if mode == tf.estimator.ModeKeys.TRAIN:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
+    if mode == estimator.ModeKeys.TRAIN:
+        return estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss, train_op=train_op)
