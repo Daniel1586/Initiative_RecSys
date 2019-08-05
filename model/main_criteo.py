@@ -40,7 +40,7 @@ flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot
 flags.DEFINE_integer("field_size", 39, "Number of fields")
 flags.DEFINE_integer("log_steps", 1000, "Save summary every steps")
 # model parameters--模型参数设置
-flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
+flags.DEFINE_integer("num_epochs", 30, "Number of epochs")
 flags.DEFINE_integer("batch_size", 256, "Number of batch size")
 flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
