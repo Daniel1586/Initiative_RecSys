@@ -18,7 +18,7 @@ import shutil
 import tensorflow as tf
 from datetime import date, timedelta
 from tensorflow_estimator import estimator
-from ctr_model import model_lr
+from ctr_model import lr, fm
 
 # =================== CMD Arguments for CTR model =================== #
 flags = tf.app.flags
@@ -156,11 +156,6 @@ def main(_):
     distr_env_set()       # 分布式环境设置
 
     print("==================== 2.Set model params and Build CTR model...")
-    if FLAGS.algorithm == "LR":
-        model_fn = model_lr
-    else:
-        model_fn = None
-        print("Invalid algorithm, not supported!")
     model_params = {
         "feature_size": FLAGS.feature_size,
         "field_size": FLAGS.field_size,
@@ -169,6 +164,12 @@ def main(_):
         "learning_rate": FLAGS.learning_rate,
         "l2_reg_lambda": FLAGS.l2_reg_lambda
     }
+    if FLAGS.algorithm == "LR":
+        model_fn = lr
+    else:
+        model_fn = None
+        print("Invalid algorithm, not supported!")
+
     batch_num = int(FLAGS.samples_size/FLAGS.batch_size)
     train_step = batch_num * FLAGS.num_epochs       # data_num * num_epochs / batch_size
     session_config = tf.ConfigProto(device_count={"GPU": 1, "CPU": FLAGS.num_thread})
