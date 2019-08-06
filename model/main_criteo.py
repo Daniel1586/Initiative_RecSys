@@ -35,13 +35,13 @@ flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_string("clear_mod", "True", "{True, False},Clear existed model or not")
-flags.DEFINE_integer("log_steps", 1000, "Save summary every steps")
+flags.DEFINE_integer("log_steps", 2000, "Save summary every steps")
 # model parameters--模型参数设置
-flags.DEFINE_integer("samples_size", 179968, "Number of train samples")
-flags.DEFINE_integer("feature_size", 1842, "Number of features[numeric + one-hot categorical_feature]")
+flags.DEFINE_integer("samples_size", 269738, "Number of train samples")
+flags.DEFINE_integer("feature_size", 2829, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
-flags.DEFINE_integer("embed_size", 10, "Embedding size[length of hidden vector of xi/xj]")
-flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
+flags.DEFINE_integer("embed_size", 16, "Embedding size[length of hidden vector of xi/xj]")
+flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 256, "Number of batch size")
 flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
@@ -178,7 +178,7 @@ def main(_):
     train_step = batch_num * FLAGS.num_epochs       # data_num * num_epochs / batch_size
     session_config = tf.ConfigProto(device_count={"GPU": 1, "CPU": FLAGS.num_thread})
     config = estimator.RunConfig(session_config=session_config,
-                                 save_checkpoints_steps=batch_num*2,
+                                 save_checkpoints_steps=batch_num,
                                  save_summary_steps=FLAGS.log_steps,
                                  log_step_count_steps=FLAGS.log_steps)
     ctr = estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
@@ -191,14 +191,14 @@ def main(_):
             max_steps=train_step)
         eval_spec = estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False), steps=None,
-            start_delay_secs=30, throttle_secs=20)
+            start_delay_secs=50, throttle_secs=20)
         estimator.train_and_evaluate(ctr, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
         ctr.evaluate(input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False))
     elif FLAGS.task_mode == "infer":
         preds = ctr.predict(
             input_fn=lambda: input_fn(tests_files, FLAGS.batch_size, 1, False), predict_keys="prob")
-        with open(FLAGS.input_dir+"/tests_pred.txt", "w") as fo:
+        with open(FLAGS.input_dir+"/pred_tests.txt", "w") as fo:
             for prob in preds:
                 fo.write("%f\n" % (prob['prob']))
     elif FLAGS.task_mode == "export":
