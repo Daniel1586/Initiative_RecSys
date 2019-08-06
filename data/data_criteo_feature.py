@@ -8,7 +8,6 @@ Challenge (https://www.kaggle.com/c/criteo-display-ad-challenge).
 ----从train.txt取最后330000条数据,最后30000条数据为测试集;
 ----前面300000条数据按9:1比例随机选取为训练集/验证集;
 ----从test.txt取开始30000条数据为infer样本集;
-----[numeric + one-hot categorical_feature]
 This code is referenced from PaddlePaddle models.
 (https://github.com/PaddlePaddle/models/blob/develop/legacy/deep_fm/preprocess.py)
 --For numeric features, clipped and normalized.
