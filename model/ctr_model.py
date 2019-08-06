@@ -55,9 +55,7 @@ def lr(features, labels, mode, params):
                l2_reg_lambda * tf.nn.l2_loss(coe_w)
     else:
         loss = tf.reduce_mean(tf.square(labels-y_pred))
-    eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred),
-                       "precision": tf.metrics.precision(labels, y_pred),
-                       "recall": tf.metrics.recall(labels, y_pred)}
+    eval_metric_ops = {"auc": tf.metrics.auc(labels, y_pred)}
     if mode == estimator.ModeKeys.EVAL:
         return estimator.EstimatorSpec(mode=mode, predictions=predictions, loss=loss,
                                        eval_metric_ops=eval_metric_ops)
