@@ -35,13 +35,13 @@ flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_string("clear_mod", "True", "{True, False},Clear existed model or not")
-flags.DEFINE_integer("log_steps", 2000, "Save summary every steps")
+flags.DEFINE_integer("log_steps", 3000, "Save summary every steps")
 # model parameters--模型参数设置
 flags.DEFINE_integer("samples_size", 269738, "Number of train samples")
 flags.DEFINE_integer("feature_size", 2829, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
 flags.DEFINE_integer("embed_size", 16, "Embedding size[length of hidden vector of xi/xj]")
-flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
+flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
 flags.DEFINE_integer("batch_size", 256, "Number of batch size")
 flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
@@ -68,16 +68,16 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
         return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
 
     # extract lines from input files[filename or filename list] using the Dataset API,
-    # multi-thread pre-process then prefetch some certain amount of data[6400]
-    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(9600)
+    # multi-thread pre-process then prefetch some certain amount of data[51200]
+    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(51200)
 
-    # randomize the input data with a window of 512 elements (read into memory)
+    # randomize the input data with a window of 2560 elements (read into memory)
     if perform_shuffle:
-        dataset = dataset.shuffle(buffer_size=1024)
+        dataset = dataset.shuffle(buffer_size=2560)
 
     # epochs from blending together
-    dataset = dataset.batch(batch_size)
     dataset = dataset.repeat(num_epochs)
+    dataset = dataset.batch(batch_size)
     iterator = dataset.make_one_shot_iterator()
     batch_features, batch_labels = iterator.get_next()      # [batch_size, field_size, 1]
 
@@ -174,11 +174,11 @@ def main(_):
         model_fn = None
         print("Invalid algorithm, not supported!")
 
-    batch_num = int(FLAGS.samples_size/FLAGS.batch_size)
-    train_step = batch_num * FLAGS.num_epochs       # data_num * num_epochs / batch_size
+    epoch_step = int(FLAGS.samples_size/FLAGS.batch_size)           # one epoch = num of steps
+    train_step = epoch_step * FLAGS.num_epochs                      # data_num * num_epochs / batch_size
     session_config = tf.ConfigProto(device_count={"GPU": 1, "CPU": FLAGS.num_thread})
     config = estimator.RunConfig(session_config=session_config,
-                                 save_checkpoints_steps=batch_num,
+                                 save_checkpoints_steps=epoch_step*3,
                                  save_summary_steps=FLAGS.log_steps,
                                  log_step_count_steps=FLAGS.log_steps)
     ctr = estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
