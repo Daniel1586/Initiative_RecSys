@@ -19,7 +19,7 @@ import tensorflow as tf
 from datetime import date, timedelta
 from tensorflow_estimator import estimator
 from ctr_model import lr, fm
-from ctr_model import deepfm
+from ctr_model import deepcrossing, fpnn, wd, deepfm
 
 # =================== CMD Arguments for CTR model =================== #
 flags = tf.app.flags
@@ -30,19 +30,19 @@ flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_id", None, "Index of task within the job")
 flags.DEFINE_integer("num_thread", 4, "Number of threads")
 # global parameters--全局参数设置
-flags.DEFINE_string("algorithm", "DeepFM", "{LR, FM, DeepFM, .}")
+flags.DEFINE_string("algorithm", "WD", "{LR,FM,DC,FNN,IPNN,OPNN,WD,DeepFM, .}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
 flags.DEFINE_string("serve_dir", "", "Export servable model for TensorFlow Serving")
 flags.DEFINE_string("clear_mod", "True", "{True, False},Clear existed model or not")
-flags.DEFINE_integer("log_steps", 3000, "Save summary every steps")
+flags.DEFINE_integer("log_steps", 2000, "Save summary every steps")
 # model parameters--模型参数设置
 flags.DEFINE_integer("samples_size", 269738, "Number of train samples")
 flags.DEFINE_integer("feature_size", 2829, "Number of features[numeric + one-hot categorical_feature]")
 flags.DEFINE_integer("field_size", 39, "Number of fields")
 flags.DEFINE_integer("embed_size", 16, "Embedding size[length of hidden vector of xi/xj]")
-flags.DEFINE_integer("num_epochs", 20, "Number of epochs")
+flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("batch_size", 256, "Number of batch size")
 flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
@@ -71,12 +71,12 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
         return {"feat_idx": feat_idx, "feat_val": feat_val}, labels
 
     # extract lines from input files[filename or filename list] using the Dataset API,
-    # multi-thread pre-process then prefetch some certain amount of data[51200]
-    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(51200)
+    # multi-thread pre-process then prefetch some certain amount of data[25600]
+    dataset = tf.data.TextLineDataset(filenames).map(dataset_etl, num_parallel_calls=4).prefetch(25600)
 
-    # randomize the input data with a window of 2560 elements (read into memory)
+    # randomize the input data with a window of 256 elements (read into memory)
     if perform_shuffle:
-        dataset = dataset.shuffle(buffer_size=2560)
+        dataset = dataset.shuffle(buffer_size=256)
 
     # epochs from blending together
     dataset = dataset.repeat(num_epochs)
@@ -139,9 +139,9 @@ def distr_env_set():
 def main(_):
     print("==================== 1.Check Args and Initialized Distributed Env...")
     if FLAGS.model_dir == "":       # 算法模型checkpoint文件
-        FLAGS.model_dir = (date.today() + timedelta(-1)).strftime("%Y%m%d") + "_Ckt_" + FLAGS.algorithm
+        FLAGS.model_dir = (date.today() + timedelta(-1)).strftime("%Y%m") + "_ckt_" + FLAGS.algorithm
     if FLAGS.serve_dir == "":       # 算法模型输出pb文件
-        FLAGS.serve_dir = (date.today() + timedelta(-1)).strftime("%Y%m%d") + "_Exp_" + FLAGS.algorithm
+        FLAGS.serve_dir = (date.today() + timedelta(-1)).strftime("%Y%m") + "_exp_" + FLAGS.algorithm
     if FLAGS.input_dir == "":       # windows环境测试
         FLAGS.input_dir = os.path.dirname(os.getcwd()) + "\\data" + "\\data_set_criteo\\"
 
@@ -169,12 +169,19 @@ def main(_):
         "learning_rate": FLAGS.learning_rate,
         "l2_reg_lambda": FLAGS.l2_reg_lambda,
         "deep_layers": FLAGS.deep_layers,
-        "dropout": FLAGS.dropout
+        "dropout": FLAGS.dropout,
+        "algorithm": FLAGS.algorithm
     }
     if FLAGS.algorithm == "LR":
         model_fn = lr
     elif FLAGS.algorithm == "FM":
         model_fn = fm
+    elif FLAGS.algorithm == "DC":
+        model_fn = deepcrossing
+    elif FLAGS.algorithm == "FNN" or FLAGS.algorithm == "IPNN" or FLAGS.algorithm == "OPNN":
+        model_fn = fpnn
+    elif FLAGS.algorithm == "WD":
+        model_fn = wd
     elif FLAGS.algorithm == "DeepFM":
         model_fn = deepfm
     else:
@@ -185,7 +192,7 @@ def main(_):
     train_step = epoch_step * FLAGS.num_epochs                      # data_num * num_epochs / batch_size
     session_config = tf.ConfigProto(device_count={"GPU": 1, "CPU": FLAGS.num_thread})
     config = estimator.RunConfig(session_config=session_config,
-                                 save_checkpoints_steps=epoch_step*3,
+                                 save_checkpoints_steps=epoch_step*2,
                                  save_summary_steps=FLAGS.log_steps,
                                  log_step_count_steps=FLAGS.log_steps)
     ctr = estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir,
