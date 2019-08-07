@@ -19,6 +19,7 @@ import tensorflow as tf
 from datetime import date, timedelta
 from tensorflow_estimator import estimator
 from ctr_model import lr, fm
+from ctr_model import deepfm
 
 # =================== CMD Arguments for CTR model =================== #
 flags = tf.app.flags
@@ -29,7 +30,7 @@ flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_id", None, "Index of task within the job")
 flags.DEFINE_integer("num_thread", 4, "Number of threads")
 # global parameters--全局参数设置
-flags.DEFINE_string("algorithm", "FM", "{LR, FM, ., .}")
+flags.DEFINE_string("algorithm", "DeepFM", "{LR, FM, DeepFM, .}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
@@ -47,6 +48,8 @@ flags.DEFINE_string("loss_mode", "log_loss", "{log_loss, square_loss}")
 flags.DEFINE_string("optimizer", "Adam", "{Adam, Adagrad, Momentum, Ftrl, GD}")
 flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
 flags.DEFINE_float("l2_reg_lambda", 0.0001, "L2 regularization")
+flags.DEFINE_string("deep_layers", "256,128,64", "Deep layers")
+flags.DEFINE_string("dropout", "0.5,0.5,0.5", "Dropout rate")
 FLAGS = flags.FLAGS
 
 
@@ -164,12 +167,16 @@ def main(_):
         "loss_mode": FLAGS.loss_mode,
         "optimizer": FLAGS.optimizer,
         "learning_rate": FLAGS.learning_rate,
-        "l2_reg_lambda": FLAGS.l2_reg_lambda
+        "l2_reg_lambda": FLAGS.l2_reg_lambda,
+        "deep_layers": FLAGS.deep_layers,
+        "dropout": FLAGS.dropout
     }
     if FLAGS.algorithm == "LR":
         model_fn = lr
     elif FLAGS.algorithm == "FM":
         model_fn = fm
+    elif FLAGS.algorithm == "DeepFM":
+        model_fn = deepfm
     else:
         model_fn = None
         print("Invalid algorithm, not supported!")
