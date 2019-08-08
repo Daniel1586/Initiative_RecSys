@@ -205,7 +205,7 @@ def main(_):
             max_steps=train_step)
         eval_spec = estimator.EvalSpec(
             input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False), steps=None,
-            start_delay_secs=50, throttle_secs=20)
+            start_delay_secs=50, throttle_secs=15)
         estimator.train_and_evaluate(ctr, train_spec, eval_spec)
     elif FLAGS.task_mode == "eval":
         ctr.evaluate(input_fn=lambda: input_fn(valid_files, FLAGS.batch_size, 1, False))
