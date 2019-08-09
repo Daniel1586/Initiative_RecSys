@@ -19,7 +19,7 @@ import tensorflow as tf
 from datetime import date, timedelta
 from tensorflow_estimator import estimator
 from ctr_model import lr, fm
-from ctr_model import deepcrossing, fpnn, wd, deepfm
+from ctr_model import deepcrossing, fpnn, wd, deepfm, dcn
 
 # =================== CMD Arguments for CTR model =================== #
 flags = tf.app.flags
@@ -30,7 +30,7 @@ flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_id", None, "Index of task within the job")
 flags.DEFINE_integer("num_thread", 4, "Number of threads")
 # global parameters--全局参数设置
-flags.DEFINE_string("algorithm", "WD", "{LR,FM,DC,FNN,IPNN,OPNN,WD,DeepFM, .}")
+flags.DEFINE_string("algorithm", "DCN", "{LR,FM,DC,FNN,IPNN,OPNN,WD,DeepFM,DCN}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
@@ -50,6 +50,7 @@ flags.DEFINE_float("learning_rate", 0.0005, "Learning rate")
 flags.DEFINE_float("l2_reg_lambda", 0.0001, "L2 regularization")
 flags.DEFINE_string("deep_layers", "256,128,64", "Deep layers")
 flags.DEFINE_string("dropout", "0.5,0.5,0.5", "Dropout rate")
+flags.DEFINE_integer("cross_layers", 3, "Cross layers, polynomial degree")
 FLAGS = flags.FLAGS
 
 
@@ -169,6 +170,7 @@ def main(_):
         "learning_rate": FLAGS.learning_rate,
         "l2_reg_lambda": FLAGS.l2_reg_lambda,
         "deep_layers": FLAGS.deep_layers,
+        "cross_layers": FLAGS.cross_layers,
         "dropout": FLAGS.dropout,
         "algorithm": FLAGS.algorithm
     }
@@ -184,6 +186,8 @@ def main(_):
         model_fn = wd
     elif FLAGS.algorithm == "DeepFM":
         model_fn = deepfm
+    elif FLAGS.algorithm == "DCN":
+        model_fn = dcn
     else:
         model_fn = None
         print("Invalid algorithm, not supported!")
