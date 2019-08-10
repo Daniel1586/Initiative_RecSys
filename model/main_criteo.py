@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Implementation of CTR model with the following features：
+Implementation of CTR model with the following features:
 #1 Input pipeline using Dataset API, Support parallel and prefetch.
 #2 Train pipeline using Custom Estimator by rewriting model_fn.
 #3 Support distributed training by TF_CONFIG.
@@ -20,6 +20,7 @@ from datetime import date, timedelta
 from tensorflow_estimator import estimator
 from ctr_model import lr, fm
 from ctr_model import deepcrossing, fpnn, wd, deepfm, dcn
+from ctr_model import nfm
 
 # =================== CMD Arguments for CTR model =================== #
 flags = tf.app.flags
@@ -30,7 +31,7 @@ flags.DEFINE_string("job_name", None, "Job name: ps or worker")
 flags.DEFINE_integer("task_id", None, "Index of task within the job")
 flags.DEFINE_integer("num_thread", 4, "Number of threads")
 # global parameters--全局参数设置
-flags.DEFINE_string("algorithm", "DCN", "{LR,FM,DC,FNN,IPNN,OPNN,WD,DeepFM,DCN}")
+flags.DEFINE_string("algorithm", "NFM", "{LR,FM,DC,FNN,IPNN,OPNN,WD,DeepFM,DCN,NFM}")
 flags.DEFINE_string("task_mode", "train", "{train, eval, infer, export}")
 flags.DEFINE_string("input_dir", "", "Input data dir")
 flags.DEFINE_string("model_dir", "", "Model check point file dir")
@@ -188,6 +189,8 @@ def main(_):
         model_fn = deepfm
     elif FLAGS.algorithm == "DCN":
         model_fn = dcn
+    elif FLAGS.algorithm == "NFM":
+        model_fn = nfm
     else:
         model_fn = None
         print("Invalid algorithm, not supported!")
