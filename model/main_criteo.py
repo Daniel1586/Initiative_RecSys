@@ -52,6 +52,8 @@ flags.DEFINE_float("l2_reg_lambda", 0.0001, "L2 regularization")
 flags.DEFINE_string("deep_layers", "256,128,64", "Deep layers")
 flags.DEFINE_string("dropout", "0.5,0.5,0.5", "Dropout rate")
 flags.DEFINE_integer("cross_layers", 3, "Cross layers, polynomial degree")
+tf.app.flags.DEFINE_boolean("batch_norm", False, "perform batch normaization (True or False)")
+tf.app.flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(recommend trying decay=0.9)")
 FLAGS = flags.FLAGS
 
 
@@ -87,6 +89,13 @@ def input_fn(filenames, batch_size=64, num_epochs=1, perform_shuffle=True):
     batch_features, batch_labels = iterator.get_next()      # [batch_size, field_size, 1]
 
     return batch_features, batch_labels
+
+
+def batch_norm_layer(x, train_phase, scope_bn):
+    bn_train = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True, updates_collections=None, is_training=True,  reuse=None, scope=scope_bn)
+    bn_infer = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True, updates_collections=None, is_training=False, reuse=True, scope=scope_bn)
+    z = tf.cond(tf.cast(train_phase, tf.bool), lambda: bn_train, lambda: bn_infer)
+    return z
 
 
 # Initialized Distributed Environment,初始化分布式环境
