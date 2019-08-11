@@ -52,8 +52,8 @@ flags.DEFINE_float("l2_reg_lambda", 0.0001, "L2 regularization")
 flags.DEFINE_string("deep_layers", "256,128,64", "Deep layers")
 flags.DEFINE_string("dropout", "0.5,0.5,0.5", "Dropout rate")
 flags.DEFINE_integer("cross_layers", 3, "Cross layers, polynomial degree")
-tf.app.flags.DEFINE_boolean("batch_norm", False, "perform batch normaization (True or False)")
-tf.app.flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(recommend trying decay=0.9)")
+flags.DEFINE_integer("batch_norm", 1, "Whether to perform batch normalization {0,1}")
+flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average")
 FLAGS = flags.FLAGS
 
 
